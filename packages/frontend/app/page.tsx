@@ -22,7 +22,10 @@ import {
   getPriceGuardAddress,
   getPriceGuardState,
   triggerPriceGuard,
-  formatPythPrice,
+  previewCondition,
+  getOracleOptions,
+  oracleName,
+  formatOraclePrice,
   Comparison,
   type PriceGuardState
 } from "@/lib/priceGuard";
@@ -34,6 +37,15 @@ const STAGES: { key: RebalanceStage; label: string }[] = [
   { key: "confirming", label: "Mirror node" },
   { key: "confirmed", label: "Confirmed" }
 ];
+
+/** Push-model oracles (Chainlink, Supra) are typically seconds old; Pyth on testnet can be days
+ * or weeks stale without a fresh update. Scale the unit to whichever reads naturally. */
+function formatAge(seconds: number): string {
+  if (seconds < 90) return `${seconds}s`;
+  if (seconds < 5400) return `${Math.floor(seconds / 60)}m`;
+  if (seconds < 172800) return `${Math.floor(seconds / 3600)}h`;
+  return `${Math.floor(seconds / 86400)}d`;
+}
 
 function BalanceRow({ token }: { token: TokenBalance }) {
   const displayed = useAnimatedNumber(Number(token.balance), token.symbol === "SAUCE" ? 6 : 8);
@@ -90,6 +102,60 @@ export default function Home() {
   const [priceGuardState, setPriceGuardState] = useState<PriceGuardState | null>(null);
   const [priceGuardAmount, setPriceGuardAmount] = useState("1.0");
   const [priceGuardStatus, setPriceGuardStatus] = useState<RebalanceStatus | null>(null);
+  const [selectedOracle, setSelectedOracle] = useState("");
+  const [selectedOracleCondition, setSelectedOracleCondition] = useState<{
+    priceHuman: string;
+    ageSeconds: number;
+    conditionMet: boolean;
+  } | null>(null);
+
+  const oracleOptions = useMemo(() => getOracleOptions(), []);
+
+  useEffect(() => {
+    if (priceGuardState && !selectedOracle) {
+      setSelectedOracle(priceGuardState.oracleAddress);
+    }
+  }, [priceGuardState, selectedOracle]);
+
+  // Re-preview whenever the user picks a different oracle in the dropdown — the trigger button
+  // needs to reflect what *that* oracle would do, not the currently-active one, since selecting a
+  // new option doesn't switch anything until the button is actually pressed.
+  useEffect(() => {
+    if (!provider || !selectedOracle || !priceGuardState) {
+      setSelectedOracleCondition(null);
+      return;
+    }
+    if (selectedOracle.toLowerCase() === priceGuardState.oracleAddress.toLowerCase()) {
+      setSelectedOracleCondition({
+        priceHuman: formatOraclePrice(priceGuardState.observedPrice, priceGuardState.observedExpo),
+        ageSeconds: priceGuardState.observedAgeSeconds,
+        conditionMet: priceGuardState.conditionMet
+      });
+      return;
+    }
+    let cancelled = false;
+    previewCondition(
+      provider,
+      selectedOracle,
+      priceGuardState.triggerPrice,
+      priceGuardState.triggerExpo,
+      priceGuardState.comparison
+    )
+      .then((preview) => {
+        if (cancelled) return;
+        setSelectedOracleCondition({
+          priceHuman: formatOraclePrice(preview.price, preview.expo),
+          ageSeconds: preview.ageSeconds,
+          conditionMet: preview.conditionMet
+        });
+      })
+      .catch(() => {
+        if (!cancelled) setSelectedOracleCondition(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [provider, selectedOracle, priceGuardState]);
 
   useEffect(() => {
     if (!toast) return;
@@ -274,24 +340,33 @@ export default function Home() {
       return;
     }
 
-    if (!priceGuardState.conditionMet) {
-      setToast("Price condition isn't met right now — trigger would revert.");
+    if (!selectedOracleCondition?.conditionMet) {
+      setToast("Price condition isn't met for the selected oracle — trigger would revert.");
       return;
     }
 
     setPriceGuardStatus(null);
     const signer = await provider.getSigner();
-    await triggerPriceGuard(signer, tokenA, tokenB, priceGuardAmount, async (next) => {
-      setPriceGuardStatus(next);
-      if (next.stage === "confirmed") {
-        await loadSafeData(provider);
+    await triggerPriceGuard(
+      signer,
+      priceGuardState.oracleAddress,
+      selectedOracle,
+      tokenA,
+      tokenB,
+      priceGuardAmount,
+      async (next) => {
+        setPriceGuardStatus(next);
+        if (next.stage === "confirmed") {
+          await loadSafeData(provider);
+        }
       }
-    });
+    );
   }
 
   const isRunning = status !== null && status.stage !== "confirmed" && status.stage !== "failed";
   const isPriceGuardRunning =
     priceGuardStatus !== null && priceGuardStatus.stage !== "confirmed" && priceGuardStatus.stage !== "failed";
+  const isOwner = !!account && !!safeState?.owners.some((o) => o.toLowerCase() === account.toLowerCase());
 
   return (
     <main className="page">
@@ -438,26 +513,53 @@ export default function Home() {
           {priceGuardState ? (
             <>
               <div className="ledger-row">
+                <span className="ledger-key">Active oracle</span>
+                <span className="ledger-value">{oracleName(priceGuardState.oracleAddress, oracleOptions)}</span>
+              </div>
+              <div className="ledger-row">
                 <span className="ledger-key">Condition</span>
                 <span className="ledger-value">
                   HBAR/USD {priceGuardState.comparison === Comparison.Below ? "≤" : "≥"} $
-                  {formatPythPrice(priceGuardState.triggerPrice, priceGuardState.triggerExpo)}
+                  {formatOraclePrice(priceGuardState.triggerPrice, priceGuardState.triggerExpo)}
                 </span>
               </div>
-              <div className="ledger-row">
-                <span className="ledger-key">Observed</span>
-                <span className="ledger-value">
-                  ${formatPythPrice(priceGuardState.observedPrice, priceGuardState.observedExpo)}{" "}
-                  ({Math.floor(priceGuardState.observedAgeSeconds / 86400)}d old)
-                </span>
-              </div>
-              <div className="ledger-row">
-                <span className="ledger-key">Status</span>
-                <span className="ledger-value">
-                  <span className={`status-dot ${priceGuardState.conditionMet ? "on" : "off"}`} />
-                  {priceGuardState.conditionMet ? "condition met" : "condition not met"}
-                </span>
-              </div>
+
+              {isOwner && oracleOptions.length > 1 ? (
+                <div className="ledger-row">
+                  <span className="ledger-key">Trigger with</span>
+                  <select
+                    className="swap-input"
+                    style={{ width: "auto" }}
+                    value={selectedOracle}
+                    onChange={(e) => setSelectedOracle(e.target.value)}
+                    disabled={isPriceGuardRunning}
+                  >
+                    {oracleOptions.map((o) => (
+                      <option key={o.address} value={o.address}>
+                        {o.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ) : null}
+
+              {selectedOracleCondition && (
+                <>
+                  <div className="ledger-row">
+                    <span className="ledger-key">Observed</span>
+                    <span className="ledger-value">
+                      ${selectedOracleCondition.priceHuman} ({formatAge(selectedOracleCondition.ageSeconds)} old)
+                    </span>
+                  </div>
+                  <div className="ledger-row">
+                    <span className="ledger-key">Status</span>
+                    <span className="ledger-value">
+                      <span className={`status-dot ${selectedOracleCondition.conditionMet ? "on" : "off"}`} />
+                      {selectedOracleCondition.conditionMet ? "condition met" : "condition not met"}
+                    </span>
+                  </div>
+                </>
+              )}
             </>
           ) : (
             <p className="ledger-key">Connect a wallet to load the price guard's live state.</p>
@@ -481,11 +583,21 @@ export default function Home() {
             <button
               className="btn"
               onClick={handlePriceGuardTrigger}
-              disabled={!account || isPriceGuardRunning || !priceGuardState?.conditionMet}
+              disabled={!account || isPriceGuardRunning || !selectedOracleCondition?.conditionMet}
             >
-              {isPriceGuardRunning ? "Triggering…" : "Fire trigger"}
+              {isPriceGuardRunning
+                ? "Triggering…"
+                : priceGuardState && selectedOracle.toLowerCase() !== priceGuardState.oracleAddress.toLowerCase()
+                  ? `Switch to ${oracleName(selectedOracle, oracleOptions)} & trigger`
+                  : "Fire trigger"}
             </button>
           </div>
+          {priceGuardState && selectedOracle.toLowerCase() !== priceGuardState.oracleAddress.toLowerCase() && (
+            <p className="hint" style={{ marginTop: "0.5rem" }}>
+              One signature does both — switching the active oracle and firing the trigger happen
+              in the same transaction.
+            </p>
+          )}
 
           <StatusTracker status={priceGuardStatus} />
         </section>
@@ -494,7 +606,7 @@ export default function Home() {
       <p className="hint">
         Reproduce these outside the browser with{" "}
         <code>packages/contracts/scripts/demo-rebalance.ts</code> and{" "}
-        <code>packages/contracts/scripts/deploy-price-guard.ts</code>.
+        <code>packages/contracts/scripts/deploy-oracle-adapters.ts</code>.
       </p>
 
       {toast && (

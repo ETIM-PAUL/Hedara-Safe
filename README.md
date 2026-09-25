@@ -4,27 +4,37 @@ A Gnosis Safe multisig treasury on Hedera, with two Safe modules that rebalance 
 holdings through [SaucerSwap](https://www.saucerswap.finance/):
 
 - **`RebalanceModule`** — an owner triggers a swap directly, any time.
-- **`PriceGuardedRebalanceModule`** — permissionless to call, but only executes when a live
-  [Pyth](https://pyth.network/) price condition holds. Anyone (a keeper bot, a cron job) can call
-  `trigger()`; the price is the guard, not the caller.
+- **`PriceGuardedRebalanceModule`** — permissionless to call, but only executes when a live price
+  condition holds. Anyone (a keeper bot, a cron job) can call `trigger()`; the price is the guard,
+  not the caller. The oracle backing it isn't fixed: it reads through a common
+  `IPriceOracleAdapter` interface, with real adapters for **Chainlink** and **Supra**. The Safe
+  owner can switch which one is active — and fire a trigger — in a single signed transaction via
+  `switchOracleAndTrigger()`, without redeploying or losing the configured trigger condition. See
+  [Verified testnet transaction](#verified-testnet-transaction) for a real combined switch+trigger
+  on testnet.
 
 Removing either integration removes the point of the module it's in: `RebalanceModule` without
-SaucerSwap is a stock Safe deployment, and `PriceGuardedRebalanceModule` without Pyth has no
-condition to gate on — it'd just be `RebalanceModule` again, badly.
+SaucerSwap is a stock Safe deployment, and `PriceGuardedRebalanceModule` without a real oracle
+adapter has no condition to gate on — it'd just be `RebalanceModule` again, badly.
 
 ## What's here
 
 - `packages/contracts/contracts/RebalanceModule.sol` — owner-triggered swap through SaucerSwap.
 - `packages/contracts/contracts/PriceGuardedRebalanceModule.sol` — permissionless swap, gated on
-  a live Pyth price condition. Both are meant to be extended (see [AGENTS.md](AGENTS.md)).
+  whichever `IPriceOracleAdapter` is currently set. Both are meant to be extended (see
+  [AGENTS.md](AGENTS.md)).
+- `packages/contracts/contracts/oracle/` — `IPriceOracleAdapter.sol` (the common interface) plus
+  `ChainlinkPriceAdapter.sol` and `SupraPriceAdapter.sol` — thin wrappers translating each
+  oracle's real wire format into the same `(price, expo, publishTime)` shape.
 - `packages/contracts/contracts/vendor/` — pulls the unmodified `@safe-global/safe-contracts`
   Safe singleton and `SafeProxyFactory` into the compile graph.
 - `packages/contracts/contracts/mocks/` — test doubles (`MockSafe`, `MockERC20`,
-  `MockSaucerSwapRouter`, and the Pyth SDK's own `MockPyth`) used only by the test suite, not
-  deployed.
+  `MockSaucerSwapRouter`, `MockOracleAdapter`, `MockChainlinkAggregator`, `MockSupraStorage`) used
+  only by the test suite, not deployed.
 - `packages/contracts/scripts/deploy.ts` — the real deploy sequence for `RebalanceModule` (Phase 4).
-- `packages/contracts/scripts/deploy-price-guard.ts` — deploys `PriceGuardedRebalanceModule`
-  against an existing Safe and fires a real price-gated trigger.
+- `packages/contracts/scripts/deploy-oracle-adapters.ts` — deploys both oracle adapters and
+  `PriceGuardedRebalanceModule`, enables it, fires a plain `trigger()` via Chainlink, then a
+  combined `switchOracleAndTrigger()` to Supra in one signed call — see the proof below.
 - `packages/contracts/scripts/demo-rebalance.ts` — seeds the deployed Safe and triggers a real
   swap through `RebalanceModule` (Phase 7 — produced the transaction below).
 - `packages/frontend` — Next.js app: wallet connect, a read-only Safe/treasury ledger, and a
@@ -54,6 +64,8 @@ Then fill in `.env`:
 | `NEXT_PUBLIC_SAUCERSWAP_ROUTER_ADDRESS` | Same address as above, exposed to the browser — the frontend uses it for live swap quotes via `getAmountsOut` |
 | `NEXT_PUBLIC_SAFE_ADDRESS`  | Printed by `deploy.ts` below — leave blank until you've deployed                                                                                                                                                                    |
 | `NEXT_PUBLIC_MODULE_ADDRESS` | Also printed by `deploy.ts` — the `RebalanceModule` address |
+| `NEXT_PUBLIC_PRICE_GUARD_MODULE_ADDRESS` | Printed by `deploy-oracle-adapters.ts` — optional, the Price Guard UI section hides itself if unset |
+| `NEXT_PUBLIC_CHAINLINK_ADAPTER_ADDRESS` / `NEXT_PUBLIC_SUPRA_ADAPTER_ADDRESS` | Also printed by `deploy-oracle-adapters.ts` — only the ones set show up as switch options in the UI |
 
 ## Deploy contracts to Hedera testnet
 
@@ -84,10 +96,13 @@ threshold, module status, and live treasury balances, and gives you two ways to 
 
 - **Rebalance** — owner-triggered, either direction (a toggle flips `tokenIn`/`tokenOut`), with a
   live SaucerSwap quote and a slippage % control that computes a real `amountOutMin`.
-- **Price Guard** — shows `PriceGuardedRebalanceModule`'s configured trigger condition next to
-  Pyth's live observed price, with a status dot for whether the condition currently holds. The
-  "Fire trigger" button stays disabled until it does — no point letting someone submit a
-  transaction that the contract will just revert.
+- **Price Guard** — shows `PriceGuardedRebalanceModule`'s configured trigger condition, and Safe
+  owners get a **Trigger with** picker (Chainlink, Supra, whichever adapters are configured) right
+  next to the amount field. Picking a different oracle previews its live price and whether the
+  condition would hold for it *before* you commit to anything. If the picked oracle isn't already
+  active, one click both switches to it and fires the trigger in a single signed transaction
+  (`switchOracleAndTrigger`) — no separate "switch" step. The button stays disabled until the
+  selected oracle's condition actually holds.
 
 Both share a step tracker (submitted → pending → mirror node → confirmed) and a direct Hashscan
 link on success. The Price Guard section only renders if `NEXT_PUBLIC_PRICE_GUARD_MODULE_ADDRESS`
@@ -124,26 +139,45 @@ template fills.
 calls happen from `msg.sender == Safe`'s perspective, since `execTransactionFromModule` executes
 _as_ the Safe, not as the module.
 
-**The price-guarded path** is the same Safe-custody mechanism, with one thing in front of it:
+**The price-guarded path** is the same Safe-custody mechanism, with an oracle-agnostic guard in
+front of it:
 
 ```mermaid
 flowchart LR
     Keeper(["Anyone\n(keeper bot, cron, owner)"])
+    Owner(["Safe owner\n(one signature)"])
     Guard["PriceGuardedRebalanceModule"]
-    Pyth["Pyth\n(HBAR/USD feed)"]
+    Adapter["IPriceOracleAdapter\n(currently active one)"]
     Safe[["Gnosis Safe"]]
     Router["SaucerSwap V1 Router"]
 
-    Keeper -- "trigger(..., priceUpdateData)" --> Guard
-    Guard -- "updatePriceFeeds(), then read price" --> Pyth
+    Keeper -- "trigger(...)" --> Guard
+    Owner -- "switchOracleAndTrigger(newOracle, ...)" --> Guard
+    Guard -- "refreshFee() then refresh()" --> Adapter
+    Guard -- "getPrice()" --> Adapter
     Guard -- "reverts here if condition fails" --> Guard
     Guard -- "execTransactionFromModule: approve + swap" --> Safe
     Safe --> Router
+
+    Chainlink["ChainlinkPriceAdapter"] -.->|"switchable via\nsetOracle() (owner-only)"| Adapter
+    Supra["SupraPriceAdapter"] -.-> Adapter
 ```
 
 `trigger()` is intentionally permissionless — the safety property isn't "only an owner can call
 this," it's "this only ever executes when the price condition the owner configured actually
-holds." The Safe owner still controls the condition itself via `setTrigger()`.
+holds." Choosing the oracle is a different story: only the Safe owner can do that, via `setOracle()`
+or the combined `switchOracleAndTrigger()`, because letting an arbitrary caller pick which oracle
+backs the check would let them point it at a contract that always says the condition is met —
+defeating the guard entirely. `trigger()` never takes an oracle argument for exactly this reason.
+
+**Why a common adapter interface, not two separate modules.** `PriceGuardedRebalanceModule` never
+needs to know which real oracle it's talking to: `refreshFee()` tells it exactly how much of
+`msg.value` to forward before calling `refresh()` (both are no-ops for Chainlink/Supra, since
+they're push-model and already fresh — the split exists so a future pull-model adapter, like a
+reintroduced Pyth, could slot in without changing the module), and `getPrice()` always returns the
+same three fields regardless of the oracle's native decimals or timestamp units — Supra's `time`
+is Unix *milliseconds* and its `price` is *unsigned*, both silently wrong if forwarded as-is; each
+adapter normalizes this itself, not the module.
 
 ## Verified testnet transaction
 
@@ -162,26 +196,42 @@ router, converting the Safe's WHBAR into SAUCE:
 - Result: Safe swapped 2.5 WHBAR for 1.37386050 SAUCE via the SaucerSwap V1 HBAR-SAUCE pool
 - Reproduce with `packages/contracts/scripts/demo-rebalance.ts` — see script header for what it does (HTS association, WHBAR wrap, funding the Safe, then triggering the module)
 
-`PriceGuardedRebalanceModule` — deployed, enabled, and triggered for real against Pyth's live
-Hedera testnet contract (`0xA2aa501b19aff244D90cc15a4Cf739D2725B5729`) and the HBAR/USD feed:
+**`PriceGuardedRebalanceModule` with switchable oracles** — deployed at
+[`0x1076c12c4b870AA2aBCb1Eda468FC3e2dECe258D`](https://hashscan.io/testnet/contract/0x1076c12c4b870AA2aBCb1Eda468FC3e2dECe258D),
+enabled on the Safe, and put through both trigger paths against two live, independently verified
+oracle providers:
 
-- PriceGuardedRebalanceModule: [`0x119B651AAab78687544D4Fb293cd8F245DDA9f04`](https://hashscan.io/testnet/contract/0x119B651AAab78687544D4Fb293cd8F245DDA9f04)
-- Trigger tx: [`0x60c5c87372d1ba3f57248fe233fa775ea8540900c9d323e23d17b9fdca6a8358`](https://hashscan.io/testnet/transaction/0x60c5c87372d1ba3f57248fe233fa775ea8540900c9d323e23d17b9fdca6a8358)
-- Mirror node: `GET https://testnet.mirrornode.hedera.com/api/v1/contracts/results/0x60c5c87372d1ba3f57248fe233fa775ea8540900c9d323e23d17b9fdca6a8358` → `status: 0x1` (SUCCESS)
-- Condition: trigger configured for HBAR/USD ≤ $0.081. The module read a real on-chain price of
-  **$0.08055012** from Pyth (decoded from the `Rebalanced` event: `observedPrice=8055012`,
-  `observedExpo=-8`), confirmed the condition held, and swapped 7.76809070 WHBAR for 4.26781221
-  SAUCE — all in one transaction.
+| Call | Adapter | Trigger tx | Observed price |
+|---|---|---|---|
+| `trigger()` (plain) | [`ChainlinkPriceAdapter`](https://hashscan.io/testnet/contract/0xB6867f3Fc37bbEB92C8ff717A3DBEAaeb914D25f) — wraps [`0x59bC155EB6c6C415fE43255aF66EcF0523c92B4a`](https://hashscan.io/testnet/contract/0x59bC155EB6c6C415fE43255aF66EcF0523c92B4a) (Chainlink's real HBAR/USD feed) | [`0xcefc70ea...431dc7`](https://hashscan.io/testnet/transaction/0xcefc70ea6de15ab40b6c7b0a791e4babb02e42597c1f230bc721a48827431dc7) | **$0.09403916** (8 decimals) |
+| `switchOracleAndTrigger()` (combined) | [`SupraPriceAdapter`](https://hashscan.io/testnet/contract/0x6E4933E4f2582865A4BDa4250a1A0E5e0b790Eb1) — wraps [`0x6Cd59830AAD978446e6cc7f6cc173aF7656Fb917`](https://hashscan.io/testnet/contract/0x6Cd59830AAD978446e6cc7f6cc173aF7656Fb917) (Supra's real push-oracle storage) | [`0xc1757e94...5d5f90`](https://hashscan.io/testnet/transaction/0xc1757e9430e87d4599a2fed9ef3bde570040558c3127a091b1a308fab35d5f90) | **$0.09388700** (18 decimals) |
 
-**Known limitation, documented rather than hidden:** Pyth's Hermes API (the off-chain service that
-serves fresh, signable price updates) started requiring an API key shortly before this was built.
-Without one, `deploy-price-guard.ts` calls `trigger()` with an empty `priceUpdateData` array — a
-real, supported Pyth code path (`getUpdateFee([])` costs `0`, `updatePriceFeeds([])` is a no-op) —
-so the module reads whatever price is already stored on the testnet contract rather than pushing a
-brand new one. That's still a genuine on-chain read, condition check, and swap against Pyth's real
-contract; it's just not paired with a fresh off-chain push in this demo. A production deployment
-should get a Hermes API key and push fresh updates on every trigger, with a tight
-`maxPriceAgeSeconds` — not the generous one this script uses to tolerate a stale testnet feed.
+Both transactions: `status: 0x1` (SUCCESS), independently confirmed via mirror node. The second one
+was decoded to confirm **both `OracleChanged` and `Rebalanced` fired in the same transaction** —
+proof the combined call genuinely switches and swaps atomically, not two calls disguised as one.
+Trigger condition for both: HBAR/USD ≤ $0.10. **The two prices are genuinely different** (two
+independent providers, read moments apart) and use **different native decimal conventions** (8 vs.
+18) — both correctly normalized against the same trigger by
+`PriceGuardedRebalanceModule.normalize()`, and both triggered a real swap with **zero fee and zero
+update data required**, since Chainlink and Supra are push-model and already fresh
+(`refreshFee()` returns `0` for both). Reproduce with `packages/contracts/scripts/deploy-oracle-adapters.ts`.
+
+**A real lesson from getting this proof, not a hypothetical:** the first attempt at the Chainlink
+trigger reverted with `StalePrice`. Supra's testnet feed updates roughly every 20-30 seconds, but
+Chainlink's testnet heartbeat is far coarser — its last update was ~80 minutes old at the time,
+past the 1-hour `maxPriceAgeSeconds` the module was configured with. "Push-model" doesn't mean
+"continuously fresh" on every network — it means *some* network keeps it updated on its own
+schedule, and that schedule varies a lot between providers and between testnet and mainnet.
+`maxPriceAgeSeconds` is now `86400` (24h) to comfortably cover both without weakening the guard in
+any way that matters (mainnet feeds update far more reliably than testnet ones).
+
+**Pyth was removed.** An earlier version of this module also had a `PythPriceAdapter`. It worked,
+but Pyth's Hermes API (the off-chain service needed to push fresh price data) started requiring an
+API key partway through building this, and even without one the adapter could only read Pyth's
+testnet contract's last-pushed price — sometimes weeks stale. Chainlink and Supra don't have this
+limitation: both are push-model with no off-chain step required at all, which is a strictly better
+fit for a module whose whole point is a permissionless, no-friction trigger. The
+`IPriceOracleAdapter` interface still supports pull-model oracles if one is ever worth adding back.
 
 ## Reproducing the transaction
 
@@ -204,6 +254,29 @@ This script is what produced the transaction above. It, in order:
 
 The token pair, wrap amount, and split are constants near the top of the script — edit them
 directly if you want to reproduce this against a different SaucerSwap pool.
+
+## Reproducing the oracle switch
+
+```bash
+SAFE_ADDRESS=<from NEXT_PUBLIC_SAFE_ADDRESS> \
+SAUCERSWAP_ROUTER_ADDRESS=<from .env> \
+npx hardhat run packages/contracts/scripts/deploy-oracle-adapters.ts --network hedera-testnet
+```
+
+This is what produced the Chainlink/Supra proof above. It, in order:
+
+1. Deploys `ChainlinkPriceAdapter` and `SupraPriceAdapter`, each pointed at the real oracle
+   contract on Hedera testnet.
+2. Deploys a fresh `PriceGuardedRebalanceModule` starting on the Chainlink adapter, and enables it
+   on the Safe.
+3. Fires a plain `trigger()` — Chainlink's live price against a $0.10 HBAR/USD ≤ condition.
+4. Calls `switchOracleAndTrigger()` — switches to the Supra adapter *and* fires a second trigger,
+   both in one signed transaction.
+
+Requires the Safe to already hold some WHBAR (see `demo-rebalance.ts` above to fund it). Copy the
+printed addresses into `.env` as `NEXT_PUBLIC_PRICE_GUARD_MODULE_ADDRESS`,
+`NEXT_PUBLIC_CHAINLINK_ADAPTER_ADDRESS`, and `NEXT_PUBLIC_SUPRA_ADAPTER_ADDRESS` to see the new
+module and its switch options in the frontend.
 
 ## License
 
