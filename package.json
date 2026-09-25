@@ -20,6 +20,8 @@
     "harness:run": "hedera-harness run .harness/spec.yaml"
   },
   "devDependencies": {
+    "hedera-harness": "^1.2.2",
+    "playwright": "^1.63.0",
     "prettier": "^3.3.3"
   }
 }

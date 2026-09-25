@@ -2,9 +2,11 @@ schemaVersion: 2
 
 name: safe-treasury-rebalance
 description: >
-  Complete the Gnosis Safe deployment path (singleton + proxy factory + proxy)
-  in packages/contracts/scripts/deploy.ts and wire it to the existing
-  RebalanceModule, per BUILD_PLAN.md Phase 4/5.
+  Regression recipe for the finished hedera-safe-swap template: a Safe
+  multisig treasury on Hedera with a RebalanceModule that swaps holdings
+  through SaucerSwap's live V1 router. Validates that the deployed contracts,
+  test suite, and frontend dashboard all still work — install, build, lint,
+  test, and a Playwright boot check of the real UI.
 
 agent: claude
 
@@ -24,3 +26,18 @@ constraints:
 validators:
   static: .harness/validators/static.json
   commands: .harness/validators/npm.json
+  playwright: .harness/validators/playwright-smoke.yaml
+
+# Tier 3.5 on-chain validation (chainValidation) is not enabled here. It injects an ephemeral
+# funded signer as a browser localStorage "burner wallet" for Playwright to drive — our frontend
+# only supports real EIP-1193 wallets (lib/wallet.ts), with no burner-wallet connector, so this
+# tier isn't wired up. The real on-chain proof for this template instead comes from
+# packages/contracts/scripts/demo-rebalance.ts, run directly against Hedera testnet — see the
+# "Verified testnet transaction" section in README.md for the resulting Hashscan links.
+#
+# chainValidation:
+#   enabled: true
+#   network: testnet
+#   operator:
+#     accountIdEnv: HEDERA_OPERATOR_ID
+#     privateKeyEnv: HEDERA_OPERATOR_KEY

@@ -1,6 +1,6 @@
 {
   "name": "safe-treasury-rebalance-npm",
-  "description": "npm commands for the Safe deployment recipe. Keep install named \"install\" for fingerprint skip across attempts.",
+  "description": "npm commands for the finished hedera-safe-swap template. Keep install named \"install\" for fingerprint skip across attempts.",
   "requiresNoSecrets": true,
   "forbiddenCommands": [
     "yarn install",

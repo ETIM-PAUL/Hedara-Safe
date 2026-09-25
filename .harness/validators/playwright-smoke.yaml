@@ -1,0 +1,19 @@
+server:
+  command: npm run dev --workspace packages/frontend
+  url: http://localhost:3000
+  timeoutMs: 120000
+
+defaults:
+  timeoutMs: 30000
+  hydrationTimeoutMs: 60000
+  minBodyTextLength: 20
+  failOnConsoleError: true
+
+routes:
+  - name: home
+    path: /
+
+forbidden:
+  visibleText:
+    - "NEXT_PUBLIC_SAFE_ADDRESS is not set"
+    - "NEXT_PUBLIC_MODULE_ADDRESS is not set"

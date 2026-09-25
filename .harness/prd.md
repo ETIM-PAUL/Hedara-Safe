@@ -1,57 +1,49 @@
-# Feature brief: Safe deployment + module wiring
+# Recipe: regression check for the finished template
 
 ## Goal
 
-Complete the TODO in `packages/contracts/scripts/deploy.ts`: deploy the Gnosis
-Safe singleton and proxy factory from `@safe-global/safe-contracts`, deploy one
-Safe proxy configured with the owners/threshold from `template.json`'s
-`defaults` block (2-of-3), then deploy `RebalanceModule` pointing at that Safe
-and the configured SaucerSwap router, and enable the module on the Safe.
+This is not a feature-build PRD — the template is finished. This recipe exists so
+`hedera-harness run` can be used going forward as a regression check: confirm that install,
+build, lint, tests, and the frontend's boot behavior all still hold after any future change to
+`hedera-safe-swap`.
 
-## Who it is for
+## What the template already does
 
-Developers scaffolding a Safe multisig treasury on Hedera via
-`npm create scaffold-hbar@latest --template <org>/hedera-safe-swap`.
+- `packages/contracts/contracts/RebalanceModule.sol` — a Safe module that swaps treasury holdings
+  through SaucerSwap's V1 router (`swapExactTokensForTokens`), gated to Safe owners.
+- Deployed and enabled on Hedera testnet: Safe at `0x487f330a30E6c7101f86e598BE27a5d46C8B3589`,
+  module at `0x27714cc6907e8EB771CCe77159111b19Aa2E9Efe` (see README.md for Hashscan links).
+- A real rebalance (2.5 WHBAR → 1.37386050 SAUCE) executed and mirror-node-verified via
+  `packages/contracts/scripts/demo-rebalance.ts` — also linked in README.md.
+- `packages/frontend` — Next.js dashboard: wallet connect, Safe/treasury reads, and a rebalance
+  trigger with live transaction status.
 
 ## Existing app (preserve)
 
-- `packages/contracts/contracts/RebalanceModule.sol` — do not change its
-  external interface (constructor args, `rebalance` signature).
-- `packages/contracts/contracts/interfaces/ISafe.sol` and
-  `ISaucerSwapRouter.sol` — minimal interfaces, keep them minimal.
-- `packages/frontend` — Next.js scaffold, out of scope for this increment.
-- `AGENTS.md` conventions: one module = one responsibility, no unbounded
-  swaps, don't touch vendored Safe core contracts by hand.
+- `RebalanceModule.sol`'s external interface (constructor args, `rebalance` signature) — do not
+  change without updating the deployed contract references throughout the repo.
+- The vendored Safe core (`contracts/vendor/SafeImports.sol`) — never hand-edited.
+- `lib/safe.ts`'s static `process.env.NEXT_PUBLIC_X` references — a dynamic `process.env[name]`
+  lookup breaks Next.js's client-bundle inlining silently (this bit the project once already; see
+  AGENTS.md).
 
 ## Feature to implement
 
-In `packages/contracts/scripts/deploy.ts`, replace the Phase 4 TODO with:
-
-1. Deploy `GnosisSafe` singleton and `GnosisSafeProxyFactory` from
-   `@safe-global/safe-contracts`.
-2. Build Safe `setup` calldata for a 2-of-3 owner configuration (owners can be
-   read from an `SAFE_OWNERS` env var, comma-separated addresses, falling back
-   to `[deployer]` repeated for local testing).
-3. Deploy the Safe proxy via the factory.
-4. Deploy `RebalanceModule` with the new Safe's address and
-   `SAUCERSWAP_ROUTER_ADDRESS`.
-5. Enable the module on the Safe (owner-signed `enableModule` call — for a
-   single deployer-owned test Safe this can execute directly; document that a
-   multi-owner Safe requires a threshold of signatures instead).
-6. Log the Safe address and module address clearly so they can be copied into
-   `.env` as `NEXT_PUBLIC_SAFE_ADDRESS`.
+None by default. If this recipe is run with a real feature PRD swapped in, follow AGENTS.md's
+conventions: one module = one responsibility, explicit slippage/deadline params on any fund-moving
+function, and a passing test for both the happy path and at least one failure path before calling
+a change done.
 
 ## Non-goals
 
 - Do not switch the package manager away from npm.
-- Do not modify `RebalanceModule.sol`'s external interface.
+- Do not remove or bypass the SaucerSwap integration.
 - Do not commit secrets or `.env` files.
-- Do not touch `packages/frontend` in this increment.
 
 ## Acceptance (deterministic)
 
-1. `npm run build` (root) still passes — contracts compile, frontend builds.
-2. `npm run test --workspace packages/contracts` still passes, including the
-   existing `RebalanceModule` deployment test.
-3. `deploy.ts` no longer contains the Phase 4 TODO comment block.
-4. No `.env` or secret material is committed.
+1. `npm install` and `npm run build` succeed from a clean state.
+2. `npm run lint` passes with zero errors.
+3. `npm run test --workspace packages/contracts` passes (all 7 existing cases, plus any new ones).
+4. The frontend boots and the home route renders real content — no unset-env-var error text
+   visible (see `.harness/validators/playwright-smoke.yaml`).

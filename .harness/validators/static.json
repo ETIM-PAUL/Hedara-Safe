@@ -1,6 +1,6 @@
 {
   "name": "safe-treasury-rebalance-static",
-  "description": "Static invariants for the Safe deployment increment.",
+  "description": "Static invariants for the finished hedera-safe-swap template.",
   "jsonAssertions": [
     {
       "file": "package.json",
@@ -12,10 +12,15 @@
     "required": [
       "README.md",
       "AGENTS.md",
+      "LICENSE",
+      "template.json",
       "package.json",
       "packages/contracts/package.json",
       "packages/contracts/scripts/deploy.ts",
+      "packages/contracts/scripts/demo-rebalance.ts",
       "packages/contracts/contracts/RebalanceModule.sol",
+      "packages/frontend/lib/safe.ts",
+      "packages/frontend/lib/rebalance.ts",
       ".harness/spec.yaml",
       ".harness/prd.md"
     ],
@@ -28,7 +33,7 @@
   "textAssertions": [
     {
       "file": "README.md",
-      "contains": ["npm install"]
+      "contains": ["npm install", "hashscan.io/testnet/transaction"]
     }
   ]
 }
