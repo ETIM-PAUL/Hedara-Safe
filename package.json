@@ -15,6 +15,7 @@
     "dev": "npm run dev --workspace packages/frontend",
     "build": "npm run build --workspace packages/contracts && npm run build --workspace packages/frontend",
     "lint": "npm run lint --workspace packages/contracts && npm run lint --workspace packages/frontend",
-    "test": "npm run test --workspace packages/contracts"
+    "test": "npm run test --workspace packages/contracts",
+    "harness:run": "hedera-harness run .harness/spec.yaml"
   }
 }

@@ -1,0 +1,34 @@
+{
+  "name": "safe-treasury-rebalance-static",
+  "description": "Static invariants for the Safe deployment increment.",
+  "jsonAssertions": [
+    {
+      "file": "package.json",
+      "path": "engines.node",
+      "equals": ">=20.18.3"
+    }
+  ],
+  "fileAssertions": {
+    "required": [
+      "README.md",
+      "AGENTS.md",
+      "package.json",
+      "packages/contracts/package.json",
+      "packages/contracts/scripts/deploy.ts",
+      "packages/contracts/contracts/RebalanceModule.sol",
+      ".harness/spec.yaml",
+      ".harness/prd.md"
+    ],
+    "forbidden": [
+      ".env",
+      "packages/contracts/.env",
+      "packages/frontend/.env"
+    ]
+  },
+  "textAssertions": [
+    {
+      "file": "README.md",
+      "contains": ["npm install"]
+    }
+  ]
+}

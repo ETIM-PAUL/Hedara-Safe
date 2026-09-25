@@ -1,0 +1,37 @@
+{
+  "name": "safe-treasury-rebalance-npm",
+  "description": "npm commands for the Safe deployment recipe. Keep install named \"install\" for fingerprint skip across attempts.",
+  "requiresNoSecrets": true,
+  "forbiddenCommands": [
+    "yarn install",
+    "yarn run",
+    "pnpm install",
+    "pnpm run"
+  ],
+  "commands": [
+    {
+      "name": "install",
+      "command": "npm install",
+      "timeoutMs": 300000,
+      "purpose": "Install workspace dependencies."
+    },
+    {
+      "name": "lint",
+      "command": "npm run lint",
+      "timeoutMs": 180000,
+      "purpose": "Lint contracts and frontend."
+    },
+    {
+      "name": "build",
+      "command": "npm run build",
+      "timeoutMs": 300000,
+      "purpose": "Compile contracts and build the frontend."
+    },
+    {
+      "name": "test",
+      "command": "npm run test --workspace packages/contracts",
+      "timeoutMs": 180000,
+      "purpose": "Run the RebalanceModule test suite."
+    }
+  ]
+}

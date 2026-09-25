@@ -1,0 +1,26 @@
+schemaVersion: 2
+
+name: safe-treasury-rebalance
+description: >
+  Complete the Gnosis Safe deployment path (singleton + proxy factory + proxy)
+  in packages/contracts/scripts/deploy.ts and wire it to the existing
+  RebalanceModule, per BUILD_PLAN.md Phase 4/5.
+
+agent: claude
+
+baseline:
+  commands:
+    - name: install
+      command: npm install
+    - name: build
+      command: npm run build
+
+constraints:
+  packageManager: npm
+  workspaces:
+    - packages/contracts
+    - packages/frontend
+
+validators:
+  static: .harness/validators/static.json
+  commands: .harness/validators/npm.json

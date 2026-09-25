@@ -10,3 +10,12 @@ typechain-types/
 *.log
 .DS_Store
 BUILD_PLAN.md
+
+# hedera-harness (project-centric)
+.harness/runs/
+.harness/runtime/
+.harness/cache/
+.harness/skills/
+.skill-cache/
+.harness-skills/
+.harness-context/
