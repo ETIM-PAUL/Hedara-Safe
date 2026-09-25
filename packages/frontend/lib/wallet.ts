@@ -17,6 +17,8 @@ declare global {
   interface Window {
     ethereum?: {
       request: (args: { method: string; params?: unknown[] }) => Promise<unknown>;
+      on?: (event: string, handler: (...args: unknown[]) => void) => void;
+      removeListener?: (event: string, handler: (...args: unknown[]) => void) => void;
     };
   }
 }
@@ -38,6 +40,32 @@ export async function connectWallet(): Promise<{ provider: BrowserProvider; acco
   const provider = new BrowserProvider(window.ethereum);
   const accounts = await provider.send("eth_accounts", []);
   return { provider, account: accounts[0] };
+}
+
+/**
+ * EIP-1193 has no universal "disconnect" — a wallet's connection is really just its own
+ * permission grant, which most wallets don't let a page revoke without a newer, unevenly
+ * supported RPC method (EIP-2255). Best effort: try to revoke, but the disconnect that actually
+ * matters is the caller dropping its own provider/account state.
+ */
+export async function disconnectWallet(): Promise<void> {
+  if (!window.ethereum) return;
+  try {
+    await window.ethereum.request({
+      method: "wallet_revokePermissions",
+      params: [{ eth_accounts: {} }]
+    });
+  } catch {
+    // Not supported by this wallet — the caller still clears its own state, which is the part
+    // that actually controls what this app treats as "connected".
+  }
+}
+
+export function onAccountsChanged(handler: (accounts: string[]) => void): () => void {
+  if (!window.ethereum?.on) return () => {};
+  const listener = (...args: unknown[]) => handler(args[0] as string[]);
+  window.ethereum.on("accountsChanged", listener);
+  return () => window.ethereum?.removeListener?.("accountsChanged", listener);
 }
 
 async function ensureHederaTestnet(): Promise<void> {

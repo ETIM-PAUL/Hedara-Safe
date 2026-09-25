@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { BrowserProvider } from "ethers";
-import { connectWallet, NoWalletError } from "@/lib/wallet";
+import { connectWallet, disconnectWallet, onAccountsChanged, NoWalletError } from "@/lib/wallet";
 import {
   getSafeState,
   getTreasuryBalances,
@@ -54,6 +54,27 @@ export default function Home() {
     return () => clearTimeout(timer);
   }, [toast]);
 
+  const providerRef = useRef<BrowserProvider | null>(null);
+  useEffect(() => {
+    providerRef.current = provider;
+  }, [provider]);
+
+  useEffect(() => {
+    const unsubscribe = onAccountsChanged((accounts) => {
+      if (accounts.length === 0) {
+        // The wallet itself disconnected (or the account was locked/removed) — follow suit.
+        resetConnection();
+      } else {
+        setAccount(accounts[0]);
+        if (providerRef.current) {
+          loadSafeData(providerRef.current);
+        }
+      }
+    });
+    return unsubscribe;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const [tokenA, tokenB] = getTreasuryTokens();
   const tokenIn = reversed ? tokenB : tokenA;
   const tokenOut = reversed ? tokenA : tokenB;
@@ -90,6 +111,19 @@ export default function Home() {
     ]);
     setSafeState(state);
     setBalances(tokenBalances);
+  }
+
+  function resetConnection() {
+    setProvider(null);
+    setAccount(null);
+    setSafeState(null);
+    setBalances(null);
+    setStatus(null);
+  }
+
+  async function handleDisconnect() {
+    await disconnectWallet();
+    resetConnection();
   }
 
   async function handleRebalance() {
@@ -137,7 +171,12 @@ export default function Home() {
             {connecting ? "Connecting…" : "Connect wallet"}
           </button>
         ) : (
-          <span className="account">{account}</span>
+          <>
+            <span className="account">{account}</span>
+            <button className="btn btn-secondary" onClick={handleDisconnect}>
+              Disconnect
+            </button>
+          </>
         )}
       </div>
 
