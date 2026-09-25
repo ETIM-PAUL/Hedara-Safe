@@ -9,10 +9,17 @@ a manual off-chain swap step.
 
 ## What's here
 
-- `packages/contracts` — Safe singleton + proxy factory, a `RebalanceModule` that calls the
-  SaucerSwap router, and the Hardhat test suite.
-- `packages/frontend` — Next.js app to connect a wallet, view the Safe's treasury, and trigger a
-  rebalance as an owner.
+- `packages/contracts/contracts/RebalanceModule.sol` — the integration: the only contract meant
+  to be extended (see [AGENTS.md](AGENTS.md)).
+- `packages/contracts/contracts/vendor/` — pulls the unmodified `@safe-global/safe-contracts`
+  Safe singleton and `SafeProxyFactory` into the compile graph.
+- `packages/contracts/contracts/mocks/` — test doubles (`MockSafe`, `MockERC20`,
+  `MockSaucerSwapRouter`) used only by the test suite, not deployed.
+- `packages/contracts/scripts/deploy.ts` — the real deploy sequence (Phase 4).
+- `packages/contracts/scripts/demo-rebalance.ts` — seeds the deployed Safe and triggers a real
+  swap through the module (Phase 7 — produced the transaction below).
+- `packages/frontend` — Next.js app scaffold; wallet connect and the rebalance-trigger UI are the
+  next increment. Contract interaction until then goes through the Hardhat scripts above.
 
 ## Prerequisites
 
@@ -25,8 +32,17 @@ a manual off-chain swap step.
 ```bash
 npm install
 cp .env.example .env
-# fill in HEDERA_OPERATOR_ID, HEDERA_OPERATOR_KEY, HEDERA_TESTNET_RPC_URL, SAUCERSWAP_ROUTER_ADDRESS
 ```
+
+Then fill in `.env`:
+
+| Variable | Where it comes from |
+|---|---|
+| `HEDERA_OPERATOR_ID` | Your account ID (`0.0.x`) from the [Hedera Portal](https://portal.hedera.com/) |
+| `HEDERA_OPERATOR_KEY` | That account's **ECDSA** private key — not ED25519, which has no EVM alias. Fund the account with the Portal's testnet faucet before deploying. |
+| `HEDERA_TESTNET_RPC_URL` | Defaults to `https://testnet.hashio.io/api`, Hedera's public JSON-RPC relay |
+| `SAUCERSWAP_ROUTER_ADDRESS` | The V1 router's EVM address. On testnet: `0x0000000000000000000000000000000000004b40` (contract `0.0.19264` — resolve the EVM form of any Hedera contract ID via `GET https://testnet.mirrornode.hedera.com/api/v1/contracts/{id}`) |
+| `NEXT_PUBLIC_SAFE_ADDRESS` | Printed by `deploy.ts` below — leave blank until you've deployed |
 
 ## Deploy contracts to Hedera testnet
 
@@ -35,8 +51,14 @@ npm run build --workspace packages/contracts
 npx hardhat run packages/contracts/scripts/deploy.ts --network hedera-testnet
 ```
 
-This deploys the Safe singleton, proxy factory, one Safe proxy, and the `RebalanceModule`, then
-enables the module on the Safe. Copy the resulting Safe address into `NEXT_PUBLIC_SAFE_ADDRESS`.
+This deploys the Safe singleton, `SafeProxyFactory`, one Safe proxy, and `RebalanceModule`, then
+enables the module on the Safe. Copy the printed Safe address into `NEXT_PUBLIC_SAFE_ADDRESS`.
+
+By default the Safe is deployed 1-of-1, owned by the deployer — enough to demo the module without
+external wallet signing. For a real multi-owner Safe, set `SAFE_OWNERS` (comma-separated
+addresses) and `SAFE_THRESHOLD` before deploying; `enableModule` then won't run automatically
+(it needs a threshold of owner signatures collected out of band — see the script's console output
+for what to submit).
 
 ## Run the frontend
 
@@ -44,23 +66,40 @@ enables the module on the Safe. Copy the resulting Safe address into `NEXT_PUBLI
 npm run dev
 ```
 
-Open http://localhost:3000, connect a wallet that's an owner on the deployed Safe, and trigger a
-rebalance. The UI shows the resulting transaction with a Hashscan link once mirror-node confirmed.
+Open http://localhost:3000. Currently a scaffold with a `/api/health` route; wallet connect and a
+live Safe/rebalance dashboard are the next increment. Until then, `demo-rebalance.ts` below is the
+way to actually exercise the module end to end.
 
 ## Architecture
 
+**Components.** The Safe holds the treasury and is the only account SaucerSwap ever sees funds
+move through. `RebalanceModule` is enabled on the Safe but never holds tokens itself — it only
+has permission to make the Safe act.
+
+```mermaid
+flowchart LR
+    Owner(["Owner EOA"])
+    Module["RebalanceModule\n(enabled on Safe)"]
+    Safe[["Gnosis Safe\n(holds treasury)"]]
+    Router["SaucerSwap V1 Router\n(Hedera testnet)"]
+
+    Owner -- "rebalance(tokenIn, tokenOut, amountIn, amountOutMin, deadline)" --> Module
+    Module -- "execTransactionFromModule:\napprove(router, amountIn)" --> Safe
+    Module -- "execTransactionFromModule:\nswapExactTokensForTokens(...)" --> Safe
+    Safe -- "as msg.sender" --> Router
+    Router -- "tokenOut credited to Safe" --> Safe
 ```
-Owner wallet(s)
-      |
-      v
-  Gnosis Safe (2-of-3)  --enableModule-->  RebalanceModule
-                                                  |
-                                                  v
-                                        SaucerSwap Router (Hedera testnet)
-                                                  |
-                                                  v
-                                        Treasury asset swapped, balance updated
-```
+
+**Why the module can't just hold funds itself:** the whole point is the Safe's multisig custody
+stays intact — the module only ever acts *through* `execTransactionFromModule`, so token balances
+never leave Safe custody even mid-swap. Removing SaucerSwap from this picture removes the reason
+the module exists; a Safe with no module is just a stock deployment, which is the gap this
+template fills.
+
+**Trigger flow in one call.** `rebalance()` does two things transactionally: it makes the Safe
+`approve` the router for `amountIn`, then makes the Safe call `swapExactTokensForTokens`. Both
+calls happen from `msg.sender == Safe`'s perspective, since `execTransactionFromModule` executes
+*as* the Safe, not as the module.
 
 ## Verified testnet transaction
 
@@ -81,11 +120,25 @@ router, converting the Safe's WHBAR into SAUCE:
 
 ## Reproducing the transaction
 
-1. Complete Setup and Deploy steps above.
-2. Ensure the Safe holds a small amount of a token pair with testnet liquidity on SaucerSwap.
-3. From the frontend, connect as an owner and submit a rebalance with a second owner's
-   confirmation (2-of-3 threshold).
-4. The resulting swap transaction is queryable on Hashscan and via the Hedera mirror node REST API.
+```bash
+SAFE_ADDRESS=<from NEXT_PUBLIC_SAFE_ADDRESS> \
+MODULE_ADDRESS=<RebalanceModule address, printed by deploy.ts> \
+npx hardhat run packages/contracts/scripts/demo-rebalance.ts --network hedera-testnet
+```
+
+This script is what produced the transaction above. It, in order:
+
+1. Associates the deployer's account with WHBAR and SAUCE (Hedera requires explicit HTS
+   association before an account can hold a token — via each token's `IHRC719.associate()`).
+2. Wraps 5 testnet HBAR into WHBAR through SaucerSwap's `WhbarHelper`.
+3. Associates the **Safe** with both tokens too, via an owner-authorized `execTransaction` (the
+   Safe is a separate account from the deployer, so it needs its own association).
+4. Transfers half the wrapped WHBAR into the Safe.
+5. Calls `RebalanceModule.rebalance()` as the Safe's owner, swapping that WHBAR for SAUCE through
+   the real SaucerSwap V1 router — the transaction linked above.
+
+The token pair, wrap amount, and split are constants near the top of the script — edit them
+directly if you want to reproduce this against a different SaucerSwap pool.
 
 ## License
 

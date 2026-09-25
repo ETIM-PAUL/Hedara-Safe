@@ -12,12 +12,24 @@ Safe contracts — treat them as vendored, not as something to refactor.
 
 - `packages/contracts/contracts/RebalanceModule.sol` — the only contract meant to be extended.
   This is where new triggers, new router integrations, or new swap conditions go.
-- `packages/contracts/contracts/safe/` — vendored Safe singleton + proxy factory. Do not modify.
-  If a Safe upgrade is needed, replace the vendored version wholesale and re-run the full test
-  suite, don't hand-edit.
-- `packages/contracts/scripts/deploy.ts` — deployment sequence: Safe singleton → proxy factory →
-  Safe proxy → RebalanceModule → enable module on Safe. Keep this order; the module can't be
-  enabled before the Safe proxy exists.
+- `packages/contracts/contracts/vendor/SafeImports.sol` — imports the unmodified
+  `@safe-global/safe-contracts` `Safe` and `SafeProxyFactory` into Hardhat's compile graph (they
+  live in `node_modules`, not this repo). Don't hand-edit the Safe core; if it needs an upgrade,
+  bump the npm dependency and re-run the full test suite.
+- `packages/contracts/contracts/mocks/` — test doubles (`MockSafe`, `MockERC20`,
+  `MockSaucerSwapRouter`) used only by `test/`. Never referenced by `deploy.ts` or the frontend —
+  if a mock leaks into a non-test file, that's a bug.
+- `packages/contracts/scripts/deploy.ts` — deployment sequence: Safe singleton → `SafeProxyFactory`
+  → Safe proxy → `RebalanceModule` → enable module on Safe. Keep this order; the module can't be
+  enabled before the Safe proxy exists. `enableModule` only runs automatically for a 1-of-1,
+  deployer-owned Safe (`SAFE_OWNERS`/`SAFE_THRESHOLD` unset) — a real multi-owner Safe needs that
+  step submitted separately once enough owner signatures are collected.
+- `packages/contracts/scripts/demo-rebalance.ts` — seeds a deployed Safe with real testnet tokens
+  and triggers an actual rebalance. Read this before touching HTS token interactions: Hedera
+  requires explicit association (`IHRC719.associate()`) before *any* account — including the
+  Safe itself — can hold a given token; a plain ERC20 `transfer` into an unassociated account
+  reverts with no useful message. This isn't optional ERC20 ceremony, it's a Hedera-specific
+  precondition every new token pair needs.
 - `packages/frontend/` — Next.js app. Wallet connection and Safe reads live in
   `lib/`; the rebalance trigger flow lives in the main page component.
 
