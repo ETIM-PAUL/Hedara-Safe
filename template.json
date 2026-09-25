@@ -1,0 +1,37 @@
+{
+  "name": "hedera-safe-swap",
+  "title": "Hedera Safe + SaucerSwap Treasury",
+  "description": "Gnosis Safe multisig treasury on Hedera with an owner-gated module that rebalances idle holdings through SaucerSwap.",
+  "version": "0.1.0",
+  "author": "",
+  "license": "MIT",
+  "repository": "",
+  "stack": {
+    "framework": "next",
+    "contracts": "hardhat",
+    "packageManager": "npm",
+    "node": ">=20.18.3"
+  },
+  "capabilities": {
+    "hederaServices": ["solidity-contract", "hts"],
+    "ecosystemIntegrations": ["saucerswap"]
+  },
+  "packages": {
+    "contracts": "packages/contracts",
+    "frontend": "packages/frontend"
+  },
+  "env": {
+    "required": [
+      "HEDERA_OPERATOR_ID",
+      "HEDERA_OPERATOR_KEY",
+      "HEDERA_TESTNET_RPC_URL",
+      "SAUCERSWAP_ROUTER_ADDRESS",
+      "NEXT_PUBLIC_SAFE_ADDRESS"
+    ]
+  },
+  "defaults": {
+    "network": "hedera-testnet",
+    "safeThreshold": 2,
+    "safeOwners": 3
+  }
+}

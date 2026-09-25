@@ -1,0 +1,12 @@
+node_modules/
+.env
+.env.local
+dist/
+.next/
+out/
+artifacts/
+cache/
+typechain-types/
+*.log
+.DS_Store
+BUILD_PLAN.md

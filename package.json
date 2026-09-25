@@ -1,0 +1,20 @@
+{
+  "name": "hedera-safe-swap",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Gnosis Safe multisig treasury on Hedera with a SaucerSwap rebalance module",
+  "license": "MIT",
+  "workspaces": [
+    "packages/contracts",
+    "packages/frontend"
+  ],
+  "engines": {
+    "node": ">=20.18.3"
+  },
+  "scripts": {
+    "dev": "npm run dev --workspace packages/frontend",
+    "build": "npm run build --workspace packages/contracts && npm run build --workspace packages/frontend",
+    "lint": "npm run lint --workspace packages/contracts && npm run lint --workspace packages/frontend",
+    "test": "npm run test --workspace packages/contracts"
+  }
+}
