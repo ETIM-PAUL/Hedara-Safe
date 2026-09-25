@@ -122,7 +122,15 @@ a:focus-visible {
 .section-label {
   font-size: 0.95rem;
   color: var(--ink-dim);
+  margin: 0 0 0.35rem;
+}
+
+.section-desc {
+  font-size: 0.8rem;
+  color: var(--ink-dim);
+  line-height: 1.5;
   margin: 0 0 1rem;
+  max-width: 52ch;
 }
 
 .ledger-row {

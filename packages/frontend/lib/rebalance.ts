@@ -1,5 +1,9 @@
 import { ethers } from "ethers";
 import { getModuleAddress, type TreasuryToken } from "./safe";
+import { waitForMirrorNode, type RebalanceStatus } from "./txStatus";
+
+export type { RebalanceStage, RebalanceStatus } from "./txStatus";
+export { hashscanTxUrl } from "./txStatus";
 
 const MODULE_ABI = [
   "function rebalance(address tokenIn, address tokenOut, uint256 amountIn, uint256 amountOutMin, uint256 deadline) returns (uint256)"
@@ -9,17 +13,12 @@ const ROUTER_ABI = [
   "function getAmountsOut(uint256 amountIn, address[] calldata path) view returns (uint256[] memory amounts)"
 ];
 
-const MIRROR_NODE_BASE = "https://testnet.mirrornode.hedera.com";
-const DEADLINE_WINDOW_SECONDS = 600;
+// Computed the instant the user clicks the button, before their wallet even opens a confirmation
+// prompt — a slow or missed wallet popup eats directly into this window. 10 minutes proved too
+// tight in practice (a real testnet tx reverted with DeadlinePassed after a slow confirmation);
+// 30 minutes matches what most production swap UIs default to for the same reason.
+const DEADLINE_WINDOW_SECONDS = 1800;
 const DEFAULT_SLIPPAGE_BPS = 100; // 1%
-
-export type RebalanceStage = "submitting" | "pending" | "confirming" | "confirmed" | "failed";
-
-export interface RebalanceStatus {
-  stage: RebalanceStage;
-  txHash?: string;
-  error?: string;
-}
 
 export function getRouterAddress(): string {
   const address = process.env.NEXT_PUBLIC_SAUCERSWAP_ROUTER_ADDRESS;
@@ -104,38 +103,4 @@ export async function triggerRebalance(
 
   onStatus({ stage: "confirming", txHash: tx.hash });
   await waitForMirrorNode(tx.hash, onStatus);
-}
-
-/**
- * The JSON-RPC receipt only proves consensus, not mirror-node ingestion — and a mirror node
- * link is what the bounty's eligibility gate actually wants as proof. Poll until it appears.
- */
-async function waitForMirrorNode(
-  txHash: string,
-  onStatus: (status: RebalanceStatus) => void,
-  attempts = 10,
-  delayMs = 2000
-): Promise<void> {
-  for (let i = 0; i < attempts; i++) {
-    const response = await fetch(`${MIRROR_NODE_BASE}/api/v1/contracts/results/${txHash}`);
-    if (response.ok) {
-      const data = await response.json();
-      if (data.result === "SUCCESS") {
-        onStatus({ stage: "confirmed", txHash });
-        return;
-      }
-      if (data.result && data.result !== "SUCCESS") {
-        onStatus({ stage: "failed", txHash, error: data.result });
-        return;
-      }
-    }
-    await new Promise((resolve) => setTimeout(resolve, delayMs));
-  }
-  // Mirror node just hasn't ingested it yet — the tx itself already succeeded per the RPC
-  // receipt, so surface it as confirmed rather than blocking the UI indefinitely.
-  onStatus({ stage: "confirmed", txHash });
-}
-
-export function hashscanTxUrl(txHash: string): string {
-  return `https://hashscan.io/testnet/transaction/${txHash}`;
 }

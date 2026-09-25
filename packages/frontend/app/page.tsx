@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ethers, type BrowserProvider } from "ethers";
 import { connectWallet, disconnectWallet, onAccountsChanged, NoWalletError } from "@/lib/wallet";
 import {
@@ -15,11 +15,17 @@ import {
   triggerRebalance,
   getQuote,
   applySlippage,
-  hashscanTxUrl,
-  type RebalanceStatus,
-  type RebalanceStage,
   type Quote
 } from "@/lib/rebalance";
+import { hashscanTxUrl, type RebalanceStatus, type RebalanceStage } from "@/lib/txStatus";
+import {
+  getPriceGuardAddress,
+  getPriceGuardState,
+  triggerPriceGuard,
+  formatPythPrice,
+  Comparison,
+  type PriceGuardState
+} from "@/lib/priceGuard";
 import { useAnimatedNumber } from "@/lib/useAnimatedNumber";
 
 const STAGES: { key: RebalanceStage; label: string }[] = [
@@ -39,6 +45,33 @@ function BalanceRow({ token }: { token: TokenBalance }) {
   );
 }
 
+function StatusTracker({ status }: { status: RebalanceStatus | null }) {
+  if (!status) return null;
+  const stageIndex = STAGES.findIndex((s) => s.key === status.stage);
+  return (
+    <>
+      <div className="steps">
+        {STAGES.map((stage, i) => (
+          <span
+            key={stage.key}
+            className={`step ${status.stage === "failed" && i === stageIndex ? "error" : i < stageIndex ? "done" : i === stageIndex ? "active" : ""}`}
+          >
+            {stage.label}
+          </span>
+        ))}
+      </div>
+      {status.error && <p className="error-line">{status.error}</p>}
+      {status.txHash && (
+        <p className="receipt">
+          <a href={hashscanTxUrl(status.txHash)} target="_blank" rel="noreferrer">
+            {status.txHash}
+          </a>
+        </p>
+      )}
+    </>
+  );
+}
+
 export default function Home() {
   const [provider, setProvider] = useState<BrowserProvider | null>(null);
   const [account, setAccount] = useState<string | null>(null);
@@ -54,6 +87,9 @@ export default function Home() {
   const [quote, setQuote] = useState<Quote | null>(null);
   const [quoteError, setQuoteError] = useState<string | null>(null);
   const [quoteLoading, setQuoteLoading] = useState(false);
+  const [priceGuardState, setPriceGuardState] = useState<PriceGuardState | null>(null);
+  const [priceGuardAmount, setPriceGuardAmount] = useState("1.0");
+  const [priceGuardStatus, setPriceGuardStatus] = useState<RebalanceStatus | null>(null);
 
   useEffect(() => {
     if (!toast) return;
@@ -82,7 +118,11 @@ export default function Home() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const [tokenA, tokenB] = getTreasuryTokens();
+  // getTreasuryTokens() returns fresh object literals every call — memoized so tokenIn/tokenOut
+  // keep a stable identity across renders. Without this, the quote effect below (which depends
+  // on tokenIn/tokenOut by reference and calls setQuote internally) re-triggers itself every
+  // render in an infinite loop: this bit us for real, showing as a permanently flickering quote.
+  const [tokenA, tokenB] = useMemo(() => getTreasuryTokens(), []);
   const tokenIn = reversed ? tokenB : tokenA;
   const tokenOut = reversed ? tokenA : tokenB;
 
@@ -125,6 +165,13 @@ export default function Home() {
     configError = (err as Error).message;
   }
 
+  let priceGuardAddress: string | null = null;
+  try {
+    priceGuardAddress = getPriceGuardAddress();
+  } catch {
+    // Price-guarded module is optional — its section just doesn't render if unset.
+  }
+
   async function handleConnect() {
     setError(null);
     setConnecting(true);
@@ -149,6 +196,14 @@ export default function Home() {
     ]);
     setSafeState(state);
     setBalances(tokenBalances);
+
+    if (priceGuardAddress) {
+      try {
+        setPriceGuardState(await getPriceGuardState(activeProvider));
+      } catch {
+        setPriceGuardState(null);
+      }
+    }
   }
 
   function resetConnection() {
@@ -157,6 +212,8 @@ export default function Home() {
     setSafeState(null);
     setBalances(null);
     setStatus(null);
+    setPriceGuardState(null);
+    setPriceGuardStatus(null);
   }
 
   async function handleDisconnect() {
@@ -199,8 +256,42 @@ export default function Home() {
     );
   }
 
-  const stageIndex = status ? STAGES.findIndex((s) => s.key === status.stage) : -1;
+  async function handlePriceGuardTrigger() {
+    if (!provider || !priceGuardState) return;
+
+    const requested = Number(priceGuardAmount);
+    if (!Number.isFinite(requested) || requested <= 0) {
+      setToast("Enter an amount greater than zero.");
+      return;
+    }
+
+    const currentBalance = balances?.find((b) => b.address === tokenA.address);
+    const available = Number(currentBalance?.balance ?? "0");
+    if (requested > available) {
+      setToast(
+        `Insufficient ${tokenA.symbol} balance — the Safe holds ${currentBalance?.balance ?? "0"} ${tokenA.symbol}.`
+      );
+      return;
+    }
+
+    if (!priceGuardState.conditionMet) {
+      setToast("Price condition isn't met right now — trigger would revert.");
+      return;
+    }
+
+    setPriceGuardStatus(null);
+    const signer = await provider.getSigner();
+    await triggerPriceGuard(signer, tokenA, tokenB, priceGuardAmount, async (next) => {
+      setPriceGuardStatus(next);
+      if (next.stage === "confirmed") {
+        await loadSafeData(provider);
+      }
+    });
+  }
+
   const isRunning = status !== null && status.stage !== "confirmed" && status.stage !== "failed";
+  const isPriceGuardRunning =
+    priceGuardStatus !== null && priceGuardStatus.stage !== "confirmed" && priceGuardStatus.stage !== "failed";
 
   return (
     <main className="page">
@@ -270,6 +361,7 @@ export default function Home() {
 
       <section className="ledger-section">
         <p className="section-label">Rebalance</p>
+        <p className="section-desc">Owner-only, works any time — no price condition to satisfy.</p>
         <div className="swap-form">
           <input
             className="swap-input"
@@ -329,33 +421,80 @@ export default function Home() {
           </p>
         )}
 
-        {status && (
-          <>
-            <div className="steps">
-              {STAGES.map((stage, i) => (
-                <span
-                  key={stage.key}
-                  className={`step ${status.stage === "failed" && i === stageIndex ? "error" : i < stageIndex ? "done" : i === stageIndex ? "active" : ""}`}
-                >
-                  {stage.label}
-                </span>
-              ))}
-            </div>
-            {status.error && <p className="error-line">{status.error}</p>}
-            {status.txHash && (
-              <p className="receipt">
-                <a href={hashscanTxUrl(status.txHash)} target="_blank" rel="noreferrer">
-                  {status.txHash}
-                </a>
-              </p>
-            )}
-          </>
-        )}
+        <StatusTracker status={status} />
       </section>
 
+      {priceGuardAddress && (
+        <section className="ledger-section">
+          <p className="section-label">Price Guard</p>
+          <p className="section-desc">
+            Anyone can call this — a keeper, a script, not just an owner — but it only executes
+            while the condition below holds. The contract checks, not the caller.
+          </p>
+          <div className="ledger-row">
+            <span className="ledger-key">Address</span>
+            <span className="ledger-value">{priceGuardAddress}</span>
+          </div>
+          {priceGuardState ? (
+            <>
+              <div className="ledger-row">
+                <span className="ledger-key">Condition</span>
+                <span className="ledger-value">
+                  HBAR/USD {priceGuardState.comparison === Comparison.Below ? "≤" : "≥"} $
+                  {formatPythPrice(priceGuardState.triggerPrice, priceGuardState.triggerExpo)}
+                </span>
+              </div>
+              <div className="ledger-row">
+                <span className="ledger-key">Observed</span>
+                <span className="ledger-value">
+                  ${formatPythPrice(priceGuardState.observedPrice, priceGuardState.observedExpo)}{" "}
+                  ({Math.floor(priceGuardState.observedAgeSeconds / 86400)}d old)
+                </span>
+              </div>
+              <div className="ledger-row">
+                <span className="ledger-key">Status</span>
+                <span className="ledger-value">
+                  <span className={`status-dot ${priceGuardState.conditionMet ? "on" : "off"}`} />
+                  {priceGuardState.conditionMet ? "condition met" : "condition not met"}
+                </span>
+              </div>
+            </>
+          ) : (
+            <p className="ledger-key">Connect a wallet to load the price guard's live state.</p>
+          )}
+
+          <div className="swap-form" style={{ marginTop: "1rem" }}>
+            <input
+              className="swap-input"
+              type="number"
+              min="0"
+              step="0.01"
+              value={priceGuardAmount}
+              onChange={(e) => setPriceGuardAmount(e.target.value)}
+              disabled={isPriceGuardRunning}
+            />
+            <span className="swap-direction">
+              {tokenA.symbol}
+              <span aria-hidden>→</span>
+              {tokenB.symbol}
+            </span>
+            <button
+              className="btn"
+              onClick={handlePriceGuardTrigger}
+              disabled={!account || isPriceGuardRunning || !priceGuardState?.conditionMet}
+            >
+              {isPriceGuardRunning ? "Triggering…" : "Fire trigger"}
+            </button>
+          </div>
+
+          <StatusTracker status={priceGuardStatus} />
+        </section>
+      )}
+
       <p className="hint">
-        Reproduce this outside the browser with{" "}
-        <code>packages/contracts/scripts/demo-rebalance.ts</code>.
+        Reproduce these outside the browser with{" "}
+        <code>packages/contracts/scripts/demo-rebalance.ts</code> and{" "}
+        <code>packages/contracts/scripts/deploy-price-guard.ts</code>.
       </p>
 
       {toast && (

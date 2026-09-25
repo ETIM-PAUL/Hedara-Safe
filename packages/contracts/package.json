@@ -10,7 +10,8 @@
     "deploy:testnet": "hardhat run scripts/deploy.ts --network hedera-testnet"
   },
   "dependencies": {
-    "@openzeppelin/contracts": "^5.0.0"
+    "@openzeppelin/contracts": "^5.0.0",
+    "@pythnetwork/pyth-sdk-solidity": "^4.3.1"
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-toolbox": "^5.0.0",
