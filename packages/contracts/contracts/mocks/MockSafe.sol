@@ -7,6 +7,7 @@ import {ISafe} from "../interfaces/ISafe.sol";
 /// used only by the Phase 6 test suite to exercise RebalanceModule in isolation.
 contract MockSafe is ISafe {
     mapping(address => bool) public owners;
+    mapping(address => bool) public enabledModules;
 
     constructor() {
         owners[msg.sender] = true;
@@ -20,12 +21,19 @@ contract MockSafe is ISafe {
         return owners[owner];
     }
 
+    /// @dev Mirrors real Safe's enableModule — a module must be enabled before it can call
+    /// execTransactionFromModule, same as production.
+    function enableModule(address module) external {
+        enabledModules[module] = true;
+    }
+
     function execTransactionFromModule(
         address to,
         uint256 value,
         bytes calldata data,
         Operation
     ) external returns (bool success) {
+        require(enabledModules[msg.sender], "MockSafe: module not enabled");
         (success, ) = to.call{value: value}(data);
     }
 
@@ -35,6 +43,7 @@ contract MockSafe is ISafe {
         bytes calldata data,
         Operation
     ) external returns (bool success, bytes memory returnData) {
+        require(enabledModules[msg.sender], "MockSafe: module not enabled");
         (success, returnData) = to.call{value: value}(data);
     }
 }
