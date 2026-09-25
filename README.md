@@ -36,13 +36,13 @@ cp .env.example .env
 
 Then fill in `.env`:
 
-| Variable | Where it comes from |
-|---|---|
-| `HEDERA_OPERATOR_ID` | Your account ID (`0.0.x`) from the [Hedera Portal](https://portal.hedera.com/) |
-| `HEDERA_OPERATOR_KEY` | That account's **ECDSA** private key — not ED25519, which has no EVM alias. Fund the account with the Portal's testnet faucet before deploying. |
-| `HEDERA_TESTNET_RPC_URL` | Defaults to `https://testnet.hashio.io/api`, Hedera's public JSON-RPC relay |
+| Variable                    | Where it comes from                                                                                                                                                                                                                 |
+| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `HEDERA_OPERATOR_ID`        | Your account ID (`0.0.x`) from the [Hedera Portal](https://portal.hedera.com/)                                                                                                                                                      |
+| `HEDERA_OPERATOR_KEY`       | That account's **ECDSA** private key — not ED25519, which has no EVM alias. Fund the account with the Portal's testnet faucet before deploying.                                                                                     |
+| `HEDERA_TESTNET_RPC_URL`    | Defaults to `https://testnet.hashio.io/api`, Hedera's public JSON-RPC relay                                                                                                                                                         |
 | `SAUCERSWAP_ROUTER_ADDRESS` | The V1 router's EVM address. On testnet: `0x0000000000000000000000000000000000004b40` (contract `0.0.19264` — resolve the EVM form of any Hedera contract ID via `GET https://testnet.mirrornode.hedera.com/api/v1/contracts/{id}`) |
-| `NEXT_PUBLIC_SAFE_ADDRESS` | Printed by `deploy.ts` below — leave blank until you've deployed |
+| `NEXT_PUBLIC_SAFE_ADDRESS`  | Printed by `deploy.ts` below — leave blank until you've deployed                                                                                                                                                                    |
 
 ## Deploy contracts to Hedera testnet
 
@@ -94,7 +94,7 @@ flowchart LR
 ```
 
 **Why the module can't just hold funds itself:** the whole point is the Safe's multisig custody
-stays intact — the module only ever acts *through* `execTransactionFromModule`, so token balances
+stays intact — the module only ever acts _through_ `execTransactionFromModule`, so token balances
 never leave Safe custody even mid-swap. Removing SaucerSwap from this picture removes the reason
 the module exists; a Safe with no module is just a stock deployment, which is the gap this
 template fills.
@@ -102,7 +102,7 @@ template fills.
 **Trigger flow in one call.** `rebalance()` does two things transactionally: it makes the Safe
 `approve` the router for `amountIn`, then makes the Safe call `swapExactTokensForTokens`. Both
 calls happen from `msg.sender == Safe`'s perspective, since `execTransactionFromModule` executes
-*as* the Safe, not as the module.
+_as_ the Safe, not as the module.
 
 ## Verified testnet transaction
 

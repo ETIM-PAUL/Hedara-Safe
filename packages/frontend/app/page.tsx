@@ -11,7 +11,12 @@ import {
   type SafeState,
   type TokenBalance
 } from "@/lib/safe";
-import { triggerRebalance, hashscanTxUrl, type RebalanceStatus, type RebalanceStage } from "@/lib/rebalance";
+import {
+  triggerRebalance,
+  hashscanTxUrl,
+  type RebalanceStatus,
+  type RebalanceStage
+} from "@/lib/rebalance";
 import { useAnimatedNumber } from "@/lib/useAnimatedNumber";
 
 const STAGES: { key: RebalanceStage; label: string }[] = [
@@ -60,7 +65,9 @@ export default function Home() {
       setAccount(connectedAccount);
       await loadSafeData(connectedProvider);
     } catch (err) {
-      setError(err instanceof NoWalletError ? err.message : `Failed to connect: ${(err as Error).message}`);
+      setError(
+        err instanceof NoWalletError ? err.message : `Failed to connect: ${(err as Error).message}`
+      );
     } finally {
       setConnecting(false);
     }
@@ -196,7 +203,8 @@ export default function Home() {
       </section>
 
       <p className="hint">
-        Reproduce this outside the browser with <code>packages/contracts/scripts/demo-rebalance.ts</code>.
+        Reproduce this outside the browser with{" "}
+        <code>packages/contracts/scripts/demo-rebalance.ts</code>.
       </p>
     </main>
   );

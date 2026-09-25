@@ -1,38 +1,25 @@
 {
   "name": "hedera-safe-swap",
-  "title": "Hedera Safe + SaucerSwap Treasury",
   "description": "Gnosis Safe multisig treasury on Hedera with an owner-gated module that rebalances idle holdings through SaucerSwap.",
   "version": "0.1.0",
-  "author": "",
-  "license": "MIT",
-  "repository": "",
-  "stack": {
-    "framework": "next",
-    "contracts": "hardhat",
-    "packageManager": "npm",
-    "node": ">=20.18.3"
-  },
-  "capabilities": {
-    "hederaServices": ["solidity-contract", "hts"],
-    "ecosystemIntegrations": ["saucerswap"]
-  },
-  "packages": {
-    "contracts": "packages/contracts",
-    "frontend": "packages/frontend"
-  },
-  "env": {
-    "required": [
-      "HEDERA_OPERATOR_ID",
-      "HEDERA_OPERATOR_KEY",
-      "HEDERA_TESTNET_RPC_URL",
-      "SAUCERSWAP_ROUTER_ADDRESS",
-      "NEXT_PUBLIC_SAFE_ADDRESS",
-      "NEXT_PUBLIC_MODULE_ADDRESS"
+  "create-scaffold-hbar": {
+    "capabilities": {
+      "frontend": ["nextjs-app"],
+      "solidityFramework": ["hardhat"],
+      "packageManager": ["npm"]
+    },
+    "defaults": {
+      "frontend": "nextjs-app",
+      "solidityFramework": "hardhat",
+      "packageManager": "npm"
+    },
+    "requirements": {
+      "node": ">=20.18.3"
+    },
+    "instructions": [
+      "Copy .env.example to .env and fill in your Hedera testnet operator credentials.",
+      "+ Deploy contracts: npx hardhat run packages/contracts/scripts/deploy.ts --network hedera-testnet",
+      "See README.md for the full setup and architecture."
     ]
-  },
-  "defaults": {
-    "network": "hedera-testnet",
-    "safeThreshold": 2,
-    "safeOwners": 3
   }
 }

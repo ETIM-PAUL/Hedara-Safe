@@ -26,7 +26,7 @@ Safe contracts — treat them as vendored, not as something to refactor.
   step submitted separately once enough owner signatures are collected.
 - `packages/contracts/scripts/demo-rebalance.ts` — seeds a deployed Safe with real testnet tokens
   and triggers an actual rebalance. Read this before touching HTS token interactions: Hedera
-  requires explicit association (`IHRC719.associate()`) before *any* account — including the
+  requires explicit association (`IHRC719.associate()`) before _any_ account — including the
   Safe itself — can hold a given token; a plain ERC20 `transfer` into an unassociated account
   reverts with no useful message. This isn't optional ERC20 ceremony, it's a Hedera-specific
   precondition every new token pair needs.

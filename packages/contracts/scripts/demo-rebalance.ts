@@ -24,7 +24,11 @@ const ERC20_ABI = [
   "function transfer(address to, uint256 amount) returns (bool)"
 ];
 
-async function associate(signerOrSafeCall: (data: string) => Promise<void>, tokenAddress: string, label: string) {
+async function associate(
+  signerOrSafeCall: (data: string) => Promise<void>,
+  tokenAddress: string,
+  label: string
+) {
   const iface = new ethers.Interface(IHRC719_ABI);
   const data = iface.encodeFunctionData("associate");
   console.log(`Associating ${label} (${tokenAddress})...`);
@@ -37,7 +41,9 @@ async function main() {
   const safeAddress = process.env.SAFE_ADDRESS;
   const moduleAddress = process.env.MODULE_ADDRESS;
   if (!safeAddress || !moduleAddress) {
-    throw new Error("Set SAFE_ADDRESS and MODULE_ADDRESS env vars (from the Phase 4 deploy output)");
+    throw new Error(
+      "Set SAFE_ADDRESS and MODULE_ADDRESS env vars (from the Phase 4 deploy output)"
+    );
   }
 
   const safe = await ethers.getContractAt("Safe", safeAddress);
@@ -56,7 +62,11 @@ async function main() {
   // --- 2. Wrap 5 HBAR into WHBAR ---
   console.log("Wrapping 5 HBAR into WHBAR via WhbarHelper...");
   const whbarHelperIface = new ethers.Interface(WHBAR_HELPER_ABI);
-  await directCall(WHBAR_HELPER, whbarHelperIface.encodeFunctionData("deposit"), ethers.parseEther("5"));
+  await directCall(
+    WHBAR_HELPER,
+    whbarHelperIface.encodeFunctionData("deposit"),
+    ethers.parseEther("5")
+  );
 
   const whbar = new ethers.Contract(WHBAR_TOKEN, ERC20_ABI, deployer);
   const deployerWhbarBalance = await whbar.balanceOf(deployer.address);

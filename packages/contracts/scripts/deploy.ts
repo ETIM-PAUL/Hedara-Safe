@@ -72,7 +72,8 @@ async function main() {
   console.log(`RebalanceModule deployed to ${moduleAddress}`);
 
   // 5. Enable the module — only automatic when the deployer is the Safe's sole owner.
-  const deployerIsSoleOwner = owners.length === 1 && owners[0].toLowerCase() === deployer.address.toLowerCase();
+  const deployerIsSoleOwner =
+    owners.length === 1 && owners[0].toLowerCase() === deployer.address.toLowerCase();
 
   if (deployerIsSoleOwner && threshold === 1) {
     const enableModuleData = safe.interface.encodeFunctionData("enableModule", [moduleAddress]);

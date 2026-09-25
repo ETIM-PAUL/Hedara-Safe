@@ -42,12 +42,14 @@ export function getModuleAddress(): string {
 export function getTreasuryTokens(): TreasuryToken[] {
   return [
     {
-      address: process.env.NEXT_PUBLIC_TOKEN_IN_ADDRESS || "0x0000000000000000000000000000000000003ad2",
+      address:
+        process.env.NEXT_PUBLIC_TOKEN_IN_ADDRESS || "0x0000000000000000000000000000000000003ad2",
       symbol: process.env.NEXT_PUBLIC_TOKEN_IN_SYMBOL || "WHBAR",
       decimals: 8
     },
     {
-      address: process.env.NEXT_PUBLIC_TOKEN_OUT_ADDRESS || "0x0000000000000000000000000000000000120f46",
+      address:
+        process.env.NEXT_PUBLIC_TOKEN_OUT_ADDRESS || "0x0000000000000000000000000000000000120f46",
       symbol: process.env.NEXT_PUBLIC_TOKEN_OUT_SYMBOL || "SAUCE",
       decimals: 6
     }

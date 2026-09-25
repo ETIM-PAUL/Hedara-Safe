@@ -37,7 +37,19 @@ describe("RebalanceModule", () => {
 
     const deadline = (await ethers.provider.getBlock("latest"))!.timestamp + 3600;
 
-    return { deployer, owner, nonOwner, safeStandIn, mockSafe, router, tokenIn, tokenOut, module, amountIn, deadline };
+    return {
+      deployer,
+      owner,
+      nonOwner,
+      safeStandIn,
+      mockSafe,
+      router,
+      tokenIn,
+      tokenOut,
+      module,
+      amountIn,
+      deadline
+    };
   }
 
   it("deploys with the configured Safe and router addresses", async () => {
@@ -52,7 +64,13 @@ describe("RebalanceModule", () => {
     await expect(
       module
         .connect(nonOwner)
-        .rebalance(await tokenIn.getAddress(), await tokenOut.getAddress(), amountIn, amountIn, deadline)
+        .rebalance(
+          await tokenIn.getAddress(),
+          await tokenOut.getAddress(),
+          amountIn,
+          amountIn,
+          deadline
+        )
     ).to.be.revertedWithCustomError(module, "NotSafeOwner");
   });
 
@@ -63,7 +81,13 @@ describe("RebalanceModule", () => {
     await expect(
       module
         .connect(owner)
-        .rebalance(await tokenIn.getAddress(), await tokenOut.getAddress(), amountIn, amountIn, pastDeadline)
+        .rebalance(
+          await tokenIn.getAddress(),
+          await tokenOut.getAddress(),
+          amountIn,
+          amountIn,
+          pastDeadline
+        )
     ).to.be.revertedWithCustomError(module, "DeadlinePassed");
   });
 
@@ -71,7 +95,9 @@ describe("RebalanceModule", () => {
     const { module, owner, tokenIn, tokenOut, deadline } = await deployFixture();
 
     await expect(
-      module.connect(owner).rebalance(await tokenIn.getAddress(), await tokenOut.getAddress(), 0, 0, deadline)
+      module
+        .connect(owner)
+        .rebalance(await tokenIn.getAddress(), await tokenOut.getAddress(), 0, 0, deadline)
     ).to.be.revertedWithCustomError(module, "ZeroAmount");
   });
 
@@ -82,24 +108,38 @@ describe("RebalanceModule", () => {
     await expect(
       module
         .connect(owner)
-        .rebalance(await tokenIn.getAddress(), await tokenOut.getAddress(), amountIn, amountIn, deadline)
+        .rebalance(
+          await tokenIn.getAddress(),
+          await tokenOut.getAddress(),
+          amountIn,
+          amountIn,
+          deadline
+        )
     ).to.be.revertedWith("MockSafe: module not enabled");
   });
 
   it("reverts when amountOutMin exceeds what the router can deliver (slippage/liquidity failure)", async () => {
-    const { module, mockSafe, owner, tokenIn, tokenOut, amountIn, deadline } = await deployFixture();
+    const { module, mockSafe, owner, tokenIn, tokenOut, amountIn, deadline } =
+      await deployFixture();
     await mockSafe.connect(owner).enableModule(await module.getAddress());
 
     const unreachableMin = amountIn + 1n;
     await expect(
       module
         .connect(owner)
-        .rebalance(await tokenIn.getAddress(), await tokenOut.getAddress(), amountIn, unreachableMin, deadline)
+        .rebalance(
+          await tokenIn.getAddress(),
+          await tokenOut.getAddress(),
+          amountIn,
+          unreachableMin,
+          deadline
+        )
     ).to.be.reverted;
   });
 
   it("executes a swap and emits Rebalanced on the happy path", async () => {
-    const { module, mockSafe, router, owner, tokenIn, tokenOut, amountIn, deadline } = await deployFixture();
+    const { module, mockSafe, router, owner, tokenIn, tokenOut, amountIn, deadline } =
+      await deployFixture();
     await mockSafe.connect(owner).enableModule(await module.getAddress());
 
     const safeAddress = await mockSafe.getAddress();
