@@ -227,6 +227,52 @@ a:focus-visible {
   outline: none;
 }
 
+.quote-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-top: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.quote-line {
+  font-family: var(--font-mono), monospace;
+  font-size: 0.85rem;
+  color: var(--ink-dim);
+}
+
+.slippage-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.8rem;
+  color: var(--ink-dim);
+}
+
+.slippage-input {
+  font-family: var(--font-mono), monospace;
+  font-size: 0.85rem;
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  color: var(--ink);
+  padding: 0.3rem 0.4rem;
+  width: 3.5rem;
+}
+
+.slippage-input:focus {
+  border-color: var(--brass);
+  outline: none;
+}
+
+.quote-min {
+  font-family: var(--font-mono), monospace;
+  font-size: 0.8rem;
+  color: var(--ink-dim);
+  margin: 0.3rem 0 0;
+}
+
 .steps {
   display: flex;
   gap: 0;

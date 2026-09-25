@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { BrowserProvider } from "ethers";
+import { ethers, type BrowserProvider } from "ethers";
 import { connectWallet, disconnectWallet, onAccountsChanged, NoWalletError } from "@/lib/wallet";
 import {
   getSafeState,
@@ -13,9 +13,12 @@ import {
 } from "@/lib/safe";
 import {
   triggerRebalance,
+  getQuote,
+  applySlippage,
   hashscanTxUrl,
   type RebalanceStatus,
-  type RebalanceStage
+  type RebalanceStage,
+  type Quote
 } from "@/lib/rebalance";
 import { useAnimatedNumber } from "@/lib/useAnimatedNumber";
 
@@ -47,6 +50,10 @@ export default function Home() {
   const [status, setStatus] = useState<RebalanceStatus | null>(null);
   const [reversed, setReversed] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const [slippagePct, setSlippagePct] = useState("1");
+  const [quote, setQuote] = useState<Quote | null>(null);
+  const [quoteError, setQuoteError] = useState<string | null>(null);
+  const [quoteLoading, setQuoteLoading] = useState(false);
 
   useEffect(() => {
     if (!toast) return;
@@ -78,6 +85,37 @@ export default function Home() {
   const [tokenA, tokenB] = getTreasuryTokens();
   const tokenIn = reversed ? tokenB : tokenA;
   const tokenOut = reversed ? tokenA : tokenB;
+
+  useEffect(() => {
+    if (!provider || !amount || Number(amount) <= 0) {
+      setQuote(null);
+      setQuoteError(null);
+      return;
+    }
+    let cancelled = false;
+    setQuoteLoading(true);
+    setQuoteError(null);
+    const timer = setTimeout(async () => {
+      try {
+        const result = await getQuote(provider, tokenIn, tokenOut, amount);
+        if (!cancelled) setQuote(result);
+      } catch (err) {
+        if (!cancelled) {
+          setQuote(null);
+          setQuoteError("No route/liquidity for this pair right now.");
+        }
+      } finally {
+        if (!cancelled) setQuoteLoading(false);
+      }
+    }, 400);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [provider, amount, tokenIn, tokenOut]);
+
+  const slippageBps = Math.round((Number(slippagePct) || 0) * 100);
+  const amountOutMin = quote ? applySlippage(quote.amountOut, slippageBps) : null;
 
   let safeAddress: string | null = null;
   let configError: string | null = null;
@@ -146,12 +184,19 @@ export default function Home() {
 
     setStatus(null);
     const signer = await provider.getSigner();
-    await triggerRebalance(signer, tokenIn, tokenOut, amount, async (next) => {
-      setStatus(next);
-      if (next.stage === "confirmed") {
-        await loadSafeData(provider);
-      }
-    });
+    await triggerRebalance(
+      signer,
+      tokenIn,
+      tokenOut,
+      amount,
+      async (next) => {
+        setStatus(next);
+        if (next.stage === "confirmed") {
+          await loadSafeData(provider);
+        }
+      },
+      slippageBps
+    );
   }
 
   const stageIndex = status ? STAGES.findIndex((s) => s.key === status.stage) : -1;
@@ -252,6 +297,37 @@ export default function Home() {
             {isRunning ? "Swapping…" : "Swap via SaucerSwap"}
           </button>
         </div>
+
+        <div className="quote-row">
+          <span className="quote-line">
+            {quoteLoading
+              ? "Fetching quote…"
+              : quote
+                ? `≈ ${quote.amountOutHuman} ${tokenOut.symbol}`
+                : quoteError
+                  ? quoteError
+                  : "—"}
+          </span>
+          <label className="slippage-control">
+            Slippage
+            <input
+              className="slippage-input"
+              type="number"
+              min="0"
+              max="50"
+              step="0.1"
+              value={slippagePct}
+              onChange={(e) => setSlippagePct(e.target.value)}
+              disabled={isRunning}
+            />
+            %
+          </label>
+        </div>
+        {amountOutMin !== null && quote && (
+          <p className="quote-min">
+            Minimum received: {ethers.formatUnits(amountOutMin, tokenOut.decimals)} {tokenOut.symbol}
+          </p>
+        )}
 
         {status && (
           <>
