@@ -1,5 +1,5 @@
 import { ethers } from "ethers";
-import { getModuleAddress, getTreasuryTokens } from "./safe";
+import { getModuleAddress, type TreasuryToken } from "./safe";
 
 const MODULE_ABI = [
   "function rebalance(address tokenIn, address tokenOut, uint256 amountIn, uint256 amountOutMin, uint256 deadline) returns (uint256)"
@@ -17,16 +17,17 @@ export interface RebalanceStatus {
 }
 
 /**
- * Triggers a real rebalance: tokenIn -> tokenOut, using the treasury token pair from
- * lib/safe.ts's getTreasuryTokens(). amountOutMin is left permissive (1) — this is a demo
- * trigger, not a production slippage-guarded flow; a real UI should let the owner set it.
+ * Triggers a real rebalance: tokenIn -> tokenOut, in whichever direction the caller passes.
+ * amountOutMin is left permissive (1) — this is a demo trigger, not a production
+ * slippage-guarded flow; a real UI should let the owner set it.
  */
 export async function triggerRebalance(
   signer: ethers.Signer,
+  tokenIn: TreasuryToken,
+  tokenOut: TreasuryToken,
   amountInHuman: string,
   onStatus: (status: RebalanceStatus) => void
 ): Promise<void> {
-  const [tokenIn, tokenOut] = getTreasuryTokens();
   const module = new ethers.Contract(getModuleAddress(), MODULE_ABI, signer);
 
   const amountIn = ethers.parseUnits(amountInHuman, tokenIn.decimals);

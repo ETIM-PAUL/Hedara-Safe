@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { BrowserProvider } from "ethers";
 import { connectWallet, NoWalletError } from "@/lib/wallet";
 import {
@@ -45,8 +45,18 @@ export default function Home() {
   const [connecting, setConnecting] = useState(false);
   const [amount, setAmount] = useState("1.0");
   const [status, setStatus] = useState<RebalanceStatus | null>(null);
+  const [reversed, setReversed] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
 
-  const [tokenIn, tokenOut] = getTreasuryTokens();
+  useEffect(() => {
+    if (!toast) return;
+    const timer = setTimeout(() => setToast(null), 4000);
+    return () => clearTimeout(timer);
+  }, [toast]);
+
+  const [tokenA, tokenB] = getTreasuryTokens();
+  const tokenIn = reversed ? tokenB : tokenA;
+  const tokenOut = reversed ? tokenA : tokenB;
 
   let safeAddress: string | null = null;
   let configError: string | null = null;
@@ -84,9 +94,25 @@ export default function Home() {
 
   async function handleRebalance() {
     if (!provider) return;
+
+    const requested = Number(amount);
+    if (!Number.isFinite(requested) || requested <= 0) {
+      setToast("Enter an amount greater than zero.");
+      return;
+    }
+
+    const currentBalance = balances?.find((b) => b.address === tokenIn.address);
+    const available = Number(currentBalance?.balance ?? "0");
+    if (requested > available) {
+      setToast(
+        `Insufficient ${tokenIn.symbol} balance — the Safe holds ${currentBalance?.balance ?? "0"} ${tokenIn.symbol}.`
+      );
+      return;
+    }
+
     setStatus(null);
     const signer = await provider.getSigner();
-    await triggerRebalance(signer, amount, async (next) => {
+    await triggerRebalance(signer, tokenIn, tokenOut, amount, async (next) => {
       setStatus(next);
       if (next.stage === "confirmed") {
         await loadSafeData(provider);
@@ -171,7 +197,17 @@ export default function Home() {
             disabled={isRunning}
           />
           <span className="swap-direction">
-            {tokenIn.symbol} → {tokenOut.symbol}
+            {tokenIn.symbol}
+            <button
+              type="button"
+              className="direction-toggle"
+              onClick={() => setReversed((r) => !r)}
+              disabled={isRunning}
+              aria-label="Reverse swap direction"
+            >
+              ⇄
+            </button>
+            {tokenOut.symbol}
           </span>
           <button className="btn" onClick={handleRebalance} disabled={!account || isRunning}>
             {isRunning ? "Swapping…" : "Swap via SaucerSwap"}
@@ -206,6 +242,12 @@ export default function Home() {
         Reproduce this outside the browser with{" "}
         <code>packages/contracts/scripts/demo-rebalance.ts</code>.
       </p>
+
+      {toast && (
+        <div className="toast" role="alert">
+          {toast}
+        </div>
+      )}
     </main>
   );
 }

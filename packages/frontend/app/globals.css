@@ -181,6 +181,34 @@ a:focus-visible {
   font-family: var(--font-mono), monospace;
   font-size: 0.9rem;
   color: var(--ink-dim);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.direction-toggle {
+  font-family: var(--font-mono), monospace;
+  font-size: 0.95rem;
+  background: transparent;
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  color: var(--ink-dim);
+  padding: 0.1rem 0.4rem;
+  cursor: pointer;
+  line-height: 1.4;
+  transition:
+    color 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.direction-toggle:hover:not(:disabled) {
+  color: var(--brass-bright);
+  border-color: var(--brass);
+}
+
+.direction-toggle:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 
 .swap-input {
@@ -252,4 +280,36 @@ a:focus-visible {
 
 .hint code {
   font-family: var(--font-mono), monospace;
+}
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 2rem;
+  transform: translateX(-50%);
+  background: var(--surface);
+  border: 1px solid var(--danger);
+  color: var(--ink);
+  font-size: 0.85rem;
+  padding: 0.75rem 1.1rem;
+  border-radius: 4px;
+  max-width: calc(100vw - 3rem);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .toast {
+    animation: toast-in 0.2s ease-out;
+  }
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 8px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
 }
