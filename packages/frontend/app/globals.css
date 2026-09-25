@@ -1,0 +1,255 @@
+:root {
+  --ink: #e8e4da;
+  --ink-dim: #8f979d;
+  --bg: #14181c;
+  --surface: #1b2126;
+  --rule: #2c343b;
+  --brass: #c08a3e;
+  --brass-bright: #d9a557;
+  --success: #7fa97f;
+  --danger: #c06b57;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  padding: 0;
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+}
+
+body {
+  font-family: var(--font-ui), system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: var(--brass-bright);
+}
+
+button:focus-visible,
+input:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--brass-bright);
+  outline-offset: 2px;
+}
+
+.page {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 3rem 1.5rem 5rem;
+}
+
+.mark {
+  font-family: var(--font-display), serif;
+  font-size: 1.75rem;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  margin: 0;
+}
+
+.tagline {
+  color: var(--ink-dim);
+  font-size: 0.95rem;
+  margin: 0.4rem 0 2.5rem;
+  max-width: 46ch;
+  line-height: 1.5;
+}
+
+.connect-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-bottom: 1.5rem;
+  margin-bottom: 2rem;
+  border-bottom: 1px solid var(--rule);
+}
+
+.account {
+  font-family: var(--font-mono), monospace;
+  font-size: 0.85rem;
+  color: var(--ink-dim);
+}
+
+.btn {
+  font-family: var(--font-ui), sans-serif;
+  font-size: 0.9rem;
+  font-weight: 600;
+  background: var(--brass);
+  color: #16130c;
+  border: none;
+  border-radius: 3px;
+  padding: 0.6rem 1.1rem;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.btn:hover:not(:disabled) {
+  background: var(--brass-bright);
+}
+
+.btn:disabled {
+  background: var(--rule);
+  color: var(--ink-dim);
+  cursor: not-allowed;
+}
+
+.btn-secondary {
+  background: transparent;
+  color: var(--ink);
+  border: 1px solid var(--rule);
+}
+
+.btn-secondary:hover:not(:disabled) {
+  border-color: var(--brass);
+  background: transparent;
+}
+
+.ledger-section {
+  padding: 1.5rem 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+.ledger-section:last-child {
+  border-bottom: none;
+}
+
+.section-label {
+  font-size: 0.95rem;
+  color: var(--ink-dim);
+  margin: 0 0 1rem;
+}
+
+.ledger-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: baseline;
+  gap: 1rem;
+  padding: 0.4rem 0;
+}
+
+.ledger-row + .ledger-row {
+  border-top: 1px solid var(--rule);
+}
+
+.ledger-key {
+  font-size: 0.9rem;
+  color: var(--ink-dim);
+}
+
+.ledger-value {
+  font-family: var(--font-mono), monospace;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.95rem;
+  text-align: right;
+  word-break: break-all;
+}
+
+.ledger-value.balance {
+  font-size: 1.05rem;
+}
+
+.status-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  margin-right: 0.5rem;
+}
+
+.status-dot.on {
+  background: var(--success);
+}
+
+.status-dot.off {
+  background: var(--danger);
+}
+
+.swap-form {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.swap-direction {
+  font-family: var(--font-mono), monospace;
+  font-size: 0.9rem;
+  color: var(--ink-dim);
+}
+
+.swap-input {
+  font-family: var(--font-mono), monospace;
+  font-size: 0.95rem;
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  color: var(--ink);
+  padding: 0.5rem 0.6rem;
+  width: 8rem;
+}
+
+.swap-input:focus {
+  border-color: var(--brass);
+  outline: none;
+}
+
+.steps {
+  display: flex;
+  gap: 0;
+  margin-top: 1.25rem;
+  font-size: 0.8rem;
+}
+
+.step {
+  color: var(--ink-dim);
+  padding-bottom: 0.4rem;
+  border-bottom: 2px solid var(--rule);
+  margin-right: 1.25rem;
+}
+
+.step.active {
+  color: var(--brass-bright);
+  border-bottom-color: var(--brass);
+}
+
+.step.done {
+  color: var(--ink);
+  border-bottom-color: var(--success);
+}
+
+.step.error {
+  color: var(--danger);
+  border-bottom-color: var(--danger);
+}
+
+.receipt {
+  margin-top: 1rem;
+  font-size: 0.85rem;
+}
+
+.receipt a {
+  font-family: var(--font-mono), monospace;
+}
+
+.error-line {
+  color: var(--danger);
+  font-size: 0.85rem;
+  margin: 0.5rem 0 0;
+}
+
+.hint {
+  color: var(--ink-dim);
+  font-size: 0.8rem;
+  margin-top: 2.5rem;
+  line-height: 1.5;
+}
+
+.hint code {
+  font-family: var(--font-mono), monospace;
+}

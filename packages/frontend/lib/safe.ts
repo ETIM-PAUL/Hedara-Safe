@@ -19,8 +19,11 @@ export interface TreasuryToken {
   decimals: number;
 }
 
-function requireEnv(name: string): string {
-  const value = process.env[name];
+// Next.js inlines NEXT_PUBLIC_* vars into the client bundle only where they're referenced with a
+// static, literal `process.env.NEXT_PUBLIC_X` — a dynamic `process.env[name]` lookup can't be
+// statically analyzed, so it silently resolves to nothing in the browser. Every accessor below
+// stays static for that reason, even though it reads more repetitively than a shared helper.
+function requireEnv(name: string, value: string | undefined): string {
   if (!value) {
     throw new Error(`${name} is not set — deploy the contracts first (see README.md Setup)`);
   }
@@ -28,24 +31,24 @@ function requireEnv(name: string): string {
 }
 
 export function getSafeAddress(): string {
-  return requireEnv("NEXT_PUBLIC_SAFE_ADDRESS");
+  return requireEnv("NEXT_PUBLIC_SAFE_ADDRESS", process.env.NEXT_PUBLIC_SAFE_ADDRESS);
 }
 
 export function getModuleAddress(): string {
-  return requireEnv("NEXT_PUBLIC_MODULE_ADDRESS");
+  return requireEnv("NEXT_PUBLIC_MODULE_ADDRESS", process.env.NEXT_PUBLIC_MODULE_ADDRESS);
 }
 
 /** Tokens shown on the treasury dashboard — defaults match the WHBAR/SAUCE pair demo-rebalance.ts uses. */
 export function getTreasuryTokens(): TreasuryToken[] {
   return [
     {
-      address: process.env.NEXT_PUBLIC_TOKEN_IN_ADDRESS ?? "0x0000000000000000000000000000000000003ad2",
-      symbol: process.env.NEXT_PUBLIC_TOKEN_IN_SYMBOL ?? "WHBAR",
+      address: process.env.NEXT_PUBLIC_TOKEN_IN_ADDRESS || "0x0000000000000000000000000000000000003ad2",
+      symbol: process.env.NEXT_PUBLIC_TOKEN_IN_SYMBOL || "WHBAR",
       decimals: 8
     },
     {
-      address: process.env.NEXT_PUBLIC_TOKEN_OUT_ADDRESS ?? "0x0000000000000000000000000000000000120f46",
-      symbol: process.env.NEXT_PUBLIC_TOKEN_OUT_SYMBOL ?? "SAUCE",
+      address: process.env.NEXT_PUBLIC_TOKEN_OUT_ADDRESS || "0x0000000000000000000000000000000000120f46",
+      symbol: process.env.NEXT_PUBLIC_TOKEN_OUT_SYMBOL || "SAUCE",
       decimals: 6
     }
   ];

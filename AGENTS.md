@@ -30,8 +30,16 @@ Safe contracts — treat them as vendored, not as something to refactor.
   Safe itself — can hold a given token; a plain ERC20 `transfer` into an unassociated account
   reverts with no useful message. This isn't optional ERC20 ceremony, it's a Hedera-specific
   precondition every new token pair needs.
-- `packages/frontend/` — Next.js app. Wallet connection and Safe reads live in
-  `lib/`; the rebalance trigger flow lives in the main page component.
+- `packages/frontend/lib/` — `wallet.ts` (EIP-1193 connect + Hedera testnet chain add/switch),
+  `safe.ts` (Safe/treasury reads), `rebalance.ts` (the trigger + status flow). Keep contract
+  calls in `lib/`, not inline in `app/page.tsx` — the page should stay presentation-only.
+  Every `NEXT_PUBLIC_*` var must be read as a static `process.env.NEXT_PUBLIC_X` expression
+  (not `process.env[name]`) — Next.js can only inline a dynamic lookup like that on the server,
+  not into the browser bundle, so it silently becomes `undefined` client-side. This bit us once;
+  don't reintroduce it.
+- `packages/frontend/next.config.mjs` — loads the monorepo-root `.env` via `dotenv`, since Next
+  only auto-loads `.env` files from its own package directory. Required for `NEXT_PUBLIC_*` vars
+  to reach the client bundle at all.
 
 ## Conventions when adding a new module type
 

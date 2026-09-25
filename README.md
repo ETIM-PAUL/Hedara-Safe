@@ -18,8 +18,8 @@ a manual off-chain swap step.
 - `packages/contracts/scripts/deploy.ts` — the real deploy sequence (Phase 4).
 - `packages/contracts/scripts/demo-rebalance.ts` — seeds the deployed Safe and triggers a real
   swap through the module (Phase 7 — produced the transaction below).
-- `packages/frontend` — Next.js app scaffold; wallet connect and the rebalance-trigger UI are the
-  next increment. Contract interaction until then goes through the Hardhat scripts above.
+- `packages/frontend` — Next.js app: wallet connect, a read-only Safe/treasury ledger, and a
+  rebalance-trigger flow with live transaction status, all reading the real deployed contracts.
 
 ## Prerequisites
 
@@ -66,9 +66,12 @@ for what to submit).
 npm run dev
 ```
 
-Open http://localhost:3000. Currently a scaffold with a `/api/health` route; wallet connect and a
-live Safe/rebalance dashboard are the next increment. Until then, `demo-rebalance.ts` below is the
-way to actually exercise the module end to end.
+Open http://localhost:3000. Connect any EIP-1193 wallet (MetaMask, HashPack, or Blade in EVM
+mode — Hedera testnet is a standard EVM chain, so no HashConnect SDK is needed) and it prompts to
+add/switch to Hedera testnet automatically. Once connected, the page reads the Safe's owners,
+threshold, module status, and live treasury balances, and lets an owner trigger a real rebalance —
+with a step tracker (submitted → pending → mirror node → confirmed) and a direct Hashscan link on
+success.
 
 ## Architecture
 
