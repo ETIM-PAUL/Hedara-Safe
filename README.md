@@ -64,11 +64,15 @@ Owner wallet(s)
 
 ## Verified testnet transaction
 
-_Filled in after Phase 7 of the build plan — a real rebalance transaction executed through the
-module, linked via Hashscan / mirror node._
+Safe deployment (Phase 4) — module enabled on the Safe:
 
-- Hashscan link: TBD
-- Mirror node link: TBD
+- Safe: [`0x487f330a30E6c7101f86e598BE27a5d46C8B3589`](https://hashscan.io/testnet/contract/0x487f330a30E6c7101f86e598BE27a5d46C8B3589)
+- RebalanceModule: [`0x27714cc6907e8EB771CCe77159111b19Aa2E9Efe`](https://hashscan.io/testnet/contract/0x27714cc6907e8EB771CCe77159111b19Aa2E9Efe)
+- `enableModule` tx: [`0x7054822d2f421fc441d9bfeec9d7bd4bda2c5aeb5a3e337bc200ad4bf8c45678`](https://hashscan.io/testnet/transaction/0x7054822d2f421fc441d9bfeec9d7bd4bda2c5aeb5a3e337bc200ad4bf8c45678)
+- Mirror node: `GET https://testnet.mirrornode.hedera.com/api/v1/contracts/results/0x7054822d2f421fc441d9bfeec9d7bd4bda2c5aeb5a3e337bc200ad4bf8c45678` → `status: 0x1` (SUCCESS)
+
+_A rebalance (actual SaucerSwap execution through the module) is still TBD — that's Phase 7,
+once the Safe holds tokens with testnet liquidity to swap._
 
 ## Reproducing the transaction
 
