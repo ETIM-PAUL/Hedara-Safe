@@ -27,6 +27,7 @@
       "packages/frontend/lib/safe.ts",
       "packages/frontend/lib/rebalance.ts",
       "packages/frontend/lib/priceGuard.ts",
+      "packages/frontend/lib/usePriceGuard.ts",
       "packages/frontend/lib/txStatus.ts",
       ".harness/spec.yaml",
       ".harness/prd.md"

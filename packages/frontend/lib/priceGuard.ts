@@ -117,8 +117,11 @@ export async function previewCondition(
   };
 }
 
-export async function getPriceGuardState(provider: ethers.Provider): Promise<PriceGuardState> {
-  const module = new ethers.Contract(getPriceGuardAddress(), PRICE_GUARD_ABI, provider);
+export async function getPriceGuardState(
+  provider: ethers.Provider,
+  moduleAddress: string
+): Promise<PriceGuardState> {
+  const module = new ethers.Contract(moduleAddress, PRICE_GUARD_ABI, provider);
   const [triggerPrice, triggerExpo, comparison, maxPriceAgeSeconds, oracleAddress] = await Promise.all([
     module.triggerPrice(),
     module.triggerExpo(),
@@ -157,6 +160,7 @@ export function formatOraclePrice(price: bigint, expo: number): string {
  */
 export async function triggerPriceGuard(
   signer: ethers.Signer,
+  moduleAddress: string,
   currentOracleAddress: string,
   selectedOracleAddress: string,
   tokenIn: TreasuryToken,
@@ -164,7 +168,7 @@ export async function triggerPriceGuard(
   amountInHuman: string,
   onStatus: (status: RebalanceStatus) => void
 ): Promise<void> {
-  const module = new ethers.Contract(getPriceGuardAddress(), PRICE_GUARD_ABI, signer);
+  const module = new ethers.Contract(moduleAddress, PRICE_GUARD_ABI, signer);
   const amountIn = ethers.parseUnits(amountInHuman, tokenIn.decimals);
   // Same 30-minute window as rebalance.ts, for the same reason — see its DEADLINE_WINDOW_SECONDS
   // comment. A real testnet trigger reverted with DeadlinePassed after a slow wallet confirmation

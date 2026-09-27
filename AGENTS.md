@@ -13,6 +13,12 @@ A Gnosis Safe multisig on Hedera, extended with two Safe modules:
   `contracts/oracle/`. `setOracle()` switches it alone; `switchOracleAndTrigger()` switches and
   fires a trigger in one signed transaction (both owner-only — see why in "What NOT to do").
 
+The module is gated on **HBAR/USD**, switchable at runtime between Chainlink and Supra. WHBAR
+tracks HBAR 1:1, so HBAR/USD is a correct stand-in for the WHBAR side of a WHBAR↔SAUCE swap; it
+doesn't price SAUCE itself. A pair whose other leg isn't USD-pegged would need a real
+pair-denominated feed instead — check both providers' actual feed coverage on the target network
+before assuming HBAR/USD-style proxying is good enough.
+
 The Safe core contracts are unmodified upstream Safe contracts — treat them as vendored, not as
 something to refactor.
 
@@ -70,10 +76,13 @@ something to refactor.
   slippage), `priceGuard.ts` (`PriceGuardedRebalanceModule` state + trigger — `triggerPriceGuard()`
   picks `trigger()` vs. `switchOracleAndTrigger()` automatically based on whether the selected
   oracle differs from the active one, and `getOracleOptions()` is driven entirely by which
-  `NEXT_PUBLIC_*_ADAPTER_ADDRESS` vars are set, not hardcoded), `txStatus.ts` (shared status-stage
-  type and mirror-node polling both trigger flows use — add new trigger flows on top of this
-  rather than duplicating the polling loop). Keep contract calls in `lib/`, not inline in
-  `app/page.tsx` — the page should stay presentation-only.
+  `NEXT_PUBLIC_*_ADAPTER_ADDRESS` vars are set, not hardcoded), `usePriceGuard.ts` (the hook the
+  guard section is built from — state fetch, direction toggle, oracle preview, trigger handler;
+  kept separate from `PriceGuardSection` so a second guard instance could be added without
+  duplicating this logic, if one is ever needed),
+  `txStatus.ts` (shared status-stage type and mirror-node polling both trigger flows use — add new
+  trigger flows on top of this rather than duplicating the polling loop). Keep contract calls in
+  `lib/`, not inline in `app/page.tsx` — the page should stay presentation-only.
   Every `NEXT_PUBLIC_*` var must be read as a static `process.env.NEXT_PUBLIC_X` expression
   (not `process.env[name]`) — Next.js can only inline a dynamic lookup like that on the server,
   not into the browser bundle, so it silently becomes `undefined` client-side. This bit us once;
@@ -111,6 +120,13 @@ something to refactor.
 - Don't commit `.env` or any operator key material.
 - Don't add speculative configuration (multi-chain support, arbitrary router allowlists, etc.)
   unless it's actually being used — keep the module scoped to what the README documents.
+- Don't build an off-chain/limit-order path through SaucerSwap V3's order-book reactor for the
+  Safe. Checked directly against the reactor's deployed bytecode
+  (`0x5707B946EE64bD750A587261Ce36ec7024F3088B`) — it contains no EIP-1271 magic value
+  (`0x1626ba7e`) and no `isValidSignature` selector in either form, so it cannot verify a Safe's
+  authorization at all, only a raw ECDSA signature from a real private key. This isn't a "not
+  built yet"; it's "cannot be built against this contract as it exists today." Re-verify against
+  the live bytecode before revisiting, in case SaucerSwap ships a new reactor version.
 
 ## Testing
 

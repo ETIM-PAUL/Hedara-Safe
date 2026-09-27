@@ -32,13 +32,14 @@ adapter has no condition to gate on — it'd just be `RebalanceModule` again, ba
   `MockSaucerSwapRouter`, `MockOracleAdapter`, `MockChainlinkAggregator`, `MockSupraStorage`) used
   only by the test suite, not deployed.
 - `packages/contracts/scripts/deploy.ts` — the real deploy sequence for `RebalanceModule` (Phase 4).
-- `packages/contracts/scripts/deploy-oracle-adapters.ts` — deploys both oracle adapters and
+- `packages/contracts/scripts/deploy-oracle-adapters.ts` — deploys both oracle adapters and the
   `PriceGuardedRebalanceModule`, enables it, fires a plain `trigger()` via Chainlink, then a
   combined `switchOracleAndTrigger()` to Supra in one signed call — see the proof below.
 - `packages/contracts/scripts/demo-rebalance.ts` — seeds the deployed Safe and triggers a real
   swap through `RebalanceModule` (Phase 7 — produced the transaction below).
-- `packages/frontend` — Next.js app: wallet connect, a read-only Safe/treasury ledger, and a
-  rebalance-trigger flow with live transaction status, all reading the real deployed contracts.
+- `packages/frontend` — Next.js app: wallet connect, a read-only Safe/treasury ledger, a
+  rebalance-trigger flow, and a price-guard section (`lib/usePriceGuard.ts` is the hook behind
+  it), all reading the real deployed contracts.
 
 ## Prerequisites
 
@@ -96,13 +97,16 @@ threshold, module status, and live treasury balances, and gives you two ways to 
 
 - **Rebalance** — owner-triggered, either direction (a toggle flips `tokenIn`/`tokenOut`), with a
   live SaucerSwap quote and a slippage % control that computes a real `amountOutMin`.
-- **Price Guard** — shows `PriceGuardedRebalanceModule`'s configured trigger condition, and Safe
-  owners get a **Trigger with** picker (Chainlink, Supra, whichever adapters are configured) right
-  next to the amount field. Picking a different oracle previews its live price and whether the
-  condition would hold for it *before* you commit to anything. If the picked oracle isn't already
-  active, one click both switches to it and fires the trigger in a single signed transaction
-  (`switchOracleAndTrigger`) — no separate "switch" step. The button stays disabled until the
-  selected oracle's condition actually holds.
+- **Price Guard** — shows `PriceGuardedRebalanceModule`'s configured trigger condition (labeled
+  `Condition (HBAR/USD)` — it's explicitly not a SAUCE price condition; WHBAR is Hedera's native
+  token 1:1 wrapped, so its dollar value tracks HBAR/USD directly, which is what actually gates
+  the swap even though the swap itself moves WHBAR/SAUCE), a direction toggle just like Rebalance,
+  and Safe owners get a **Trigger with** picker (Chainlink, Supra, whichever adapters are
+  configured) right next to the amount field. Picking a different oracle previews its live price
+  and whether the condition would hold for it *before* you commit to anything. If the picked
+  oracle isn't already active, one click both switches to it and fires the trigger in a single
+  signed transaction (`switchOracleAndTrigger`) — no separate "switch" step. The button stays
+  disabled until the selected oracle's condition actually holds.
 
 Both share a step tracker (submitted → pending → mirror node → confirmed) and a direct Hashscan
 link on success. The Price Guard section only renders if `NEXT_PUBLIC_PRICE_GUARD_MODULE_ADDRESS`
@@ -232,6 +236,22 @@ testnet contract's last-pushed price — sometimes weeks stale. Chainlink and Su
 limitation: both are push-model with no off-chain step required at all, which is a strictly better
 fit for a module whose whole point is a permissionless, no-friction trigger. The
 `IPriceOracleAdapter` interface still supports pull-model oracles if one is ever worth adding back.
+
+## Off-chain limit orders were considered and ruled out
+
+SaucerSwap V3 has a native order-book/limit-order product that would, in principle, let the Safe
+post a price-bounded order off-chain and have it filled on-chain later without paying for a
+trigger transaction up front. That only works for a Safe (a smart-contract wallet with no private
+key of its own to sign with) if the order-filling contract supports **EIP-1271**
+(`isValidSignature`) so it can verify the Safe's `approvedHash`-style authorization instead of a
+raw ECDSA signature. We checked directly rather than assuming: pulled the real reactor contract's
+deployed bytecode (`0x5707B946EE64bD750A587261Ce36ec7024F3088B`) and searched all ~48KB of it for
+the EIP-1271 magic value (`0x1626ba7e`) and both `isValidSignature` selector forms
+(`bytes32,bytes` and `bytes,bytes`) — none appear anywhere in the bytecode. SaucerSwap V3's
+limit-order reactor does not support smart-contract-wallet signatures on Hedera testnet today, so
+a Safe cannot use it. We did not build an off-chain option on top of a mechanism that can't
+actually authorize the Safe; the on-chain `trigger()`/`switchOracleAndTrigger()` path above is the
+real answer instead.
 
 ## Reproducing the transaction
 
