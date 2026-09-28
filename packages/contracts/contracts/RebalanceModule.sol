@@ -19,7 +19,7 @@ contract RebalanceModule {
         uint256 amountOut
     );
 
-    error NotSafeOwner();
+    error NotSafe();
     error SwapFailed();
     error ZeroAmount();
     error DeadlinePassed();
@@ -29,12 +29,20 @@ contract RebalanceModule {
         router = ISaucerSwapRouter(_router);
     }
 
-    modifier onlySafeOwner() {
-        if (!safe.isOwner(msg.sender)) revert NotSafeOwner();
+    /// @dev Requires the call to originate from the Safe itself — i.e. from a quorum-approved
+    /// `execTransaction`, not any single owner calling this module directly. This is what makes
+    /// rebalances require the Safe's configured threshold of signatures rather than any one
+    /// owner acting alone; see AGENTS.md for why this differs from PriceGuardedRebalanceModule's
+    /// `onlySafeOwner` (single-owner) gating.
+    modifier onlySafe() {
+        if (msg.sender != address(safe)) revert NotSafe();
         _;
     }
 
     /// @notice Swap `amountIn` of `tokenIn` held by the Safe for `tokenOut` via SaucerSwap.
+    /// @dev Callable only by the Safe itself — an owner (or set of owners meeting the threshold)
+    /// must submit this as a Safe transaction (`to` = this module, `data` = this call) via
+    /// `execTransaction`, not call it directly from their own account.
     /// @param amountOutMin Minimum acceptable output — caller-supplied slippage bound.
     /// @param deadline Unix timestamp after which the swap must revert, not execute stale.
     function rebalance(
@@ -43,7 +51,7 @@ contract RebalanceModule {
         uint256 amountIn,
         uint256 amountOutMin,
         uint256 deadline
-    ) external onlySafeOwner returns (uint256 amountOut) {
+    ) external onlySafe returns (uint256 amountOut) {
         if (amountIn == 0) revert ZeroAmount();
         if (deadline < block.timestamp) revert DeadlinePassed();
 

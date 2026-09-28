@@ -9,9 +9,12 @@ import {
   getSafeAddress,
   getTreasuryTokens,
   type SafeState,
-  type TokenBalance
+  type TokenBalance,
+  type TreasuryToken
 } from "@/lib/safe";
-import { triggerRebalance, getQuote, applySlippage, type Quote } from "@/lib/rebalance";
+import { getQuote, applySlippage, DEADLINE_WINDOW_SECONDS, type Quote } from "@/lib/rebalance";
+import { addOwner } from "@/lib/multisig";
+import { useMultisigRebalance } from "@/lib/useMultisigRebalance";
 import { hashscanTxUrl, type RebalanceStatus, type RebalanceStage } from "@/lib/txStatus";
 import {
   getPriceGuardAddress,
@@ -230,13 +233,14 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [connecting, setConnecting] = useState(false);
   const [amount, setAmount] = useState("1.0");
-  const [status, setStatus] = useState<RebalanceStatus | null>(null);
   const [reversed, setReversed] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [slippagePct, setSlippagePct] = useState("1");
   const [quote, setQuote] = useState<Quote | null>(null);
   const [quoteError, setQuoteError] = useState<string | null>(null);
   const [quoteLoading, setQuoteLoading] = useState(false);
+  const [newOwnerAddress, setNewOwnerAddress] = useState("");
+  const [ownerStatus, setOwnerStatus] = useState<RebalanceStatus | null>(null);
 
   function showToast(message: string) {
     setToast(message);
@@ -356,7 +360,7 @@ export default function Home() {
     setAccount(null);
     setSafeState(null);
     setBalances(null);
-    setStatus(null);
+    multisig.reset();
   }
 
   async function handleDisconnect() {
@@ -364,7 +368,52 @@ export default function Home() {
     resetConnection();
   }
 
-  async function handleRebalance() {
+  /** Owner 1 uses this twice, while the Safe is still 1-of-N, to reach the target 2-of-3: the
+   * first call adds a 2nd owner and keeps the threshold at 1; the second adds the 3rd owner and
+   * raises the threshold to 2 in the same call — both still doable solo, since the new threshold
+   * only takes effect once that call has already executed. See AGENTS.md for why. */
+  async function handleAddOwner() {
+    if (!provider || !safeState) return;
+    if (!ethers.isAddress(newOwnerAddress)) {
+      showToast("Enter a valid EVM address for the new owner.");
+      return;
+    }
+    if (safeState.owners.some((o) => o.toLowerCase() === newOwnerAddress.toLowerCase())) {
+      showToast("That address is already an owner.");
+      return;
+    }
+    const nextThreshold = safeState.owners.length === 1 ? 1 : 2;
+    setOwnerStatus(null);
+    const signer = await provider.getSigner();
+    await addOwner(signer, newOwnerAddress, nextThreshold, async (next) => {
+      setOwnerStatus(next);
+      if (next.stage === "confirmed") {
+        setNewOwnerAddress("");
+        await loadSafeData(provider);
+      }
+    });
+  }
+
+  const multisig = useMultisigRebalance({
+    provider,
+    owners: safeState?.owners ?? [],
+    threshold: safeState?.threshold ?? 1,
+    onConfirmed: async () => {
+      if (provider) await loadSafeData(provider);
+    },
+    setToast: showToast
+  });
+
+  function tokenByAddress(address: string): TreasuryToken | undefined {
+    return [tokenA, tokenB].find((t) => t.address.toLowerCase() === address.toLowerCase());
+  }
+
+  function formatTokenAmount(address: string, raw: bigint): string {
+    const token = tokenByAddress(address);
+    return token ? `${ethers.formatUnits(raw, token.decimals)} ${token.symbol}` : raw.toString();
+  }
+
+  async function handlePropose() {
     if (!provider) return;
 
     const requested = Number(amount);
@@ -382,21 +431,36 @@ export default function Home() {
       return;
     }
 
-    setStatus(null);
+    if (!quote) {
+      showToast("Waiting for a live quote — try again in a moment.");
+      return;
+    }
+
     const signer = await provider.getSigner();
-    await triggerRebalance(
-      signer,
-      tokenIn,
-      tokenOut,
-      amount,
-      async (next) => {
-        setStatus(next);
-        if (next.stage === "confirmed") {
-          await loadSafeData(provider);
-        }
-      },
-      slippageBps
-    );
+    const amountIn = ethers.parseUnits(amount, tokenIn.decimals);
+    const min = applySlippage(quote.amountOut, slippageBps);
+    const deadline = Math.floor(Date.now() / 1000) + DEADLINE_WINDOW_SECONDS;
+    await multisig.propose(signer, tokenIn.address, tokenOut.address, amountIn, min, deadline);
+  }
+
+  async function handleApprove() {
+    if (!provider) return;
+    await multisig.approve(await provider.getSigner());
+  }
+
+  async function handleExecuteNow() {
+    if (!provider) return;
+    await multisig.executeNow(await provider.getSigner());
+  }
+
+  async function handleCopyProposal() {
+    if (!multisig.shareableBlob) return;
+    try {
+      await navigator.clipboard.writeText(multisig.shareableBlob);
+      showToast("Proposal copied — send it to the other owners to approve.");
+    } catch {
+      showToast("Couldn't access the clipboard — copy the text manually.");
+    }
   }
 
   const priceGuard = usePriceGuard({
@@ -411,8 +475,9 @@ export default function Home() {
     setToast: showToast
   });
 
-  const isRunning = status !== null && status.stage !== "confirmed" && status.stage !== "failed";
   const isOwner = !!account && !!safeState?.owners.some((o) => o.toLowerCase() === account.toLowerCase());
+  const threshold = safeState?.threshold ?? 1;
+  const proposalMet = multisig.approvals.length >= threshold;
 
   return (
     <main className="page">
@@ -467,6 +532,36 @@ export default function Home() {
                 {safeState.moduleEnabled ? "enabled" : "not enabled"}
               </span>
             </div>
+
+            {isOwner && safeState.threshold === 1 && safeState.owners.length < 3 && (
+              <div className="swap-form" style={{ marginTop: "1rem" }}>
+                <input
+                  className="swap-input"
+                  type="text"
+                  placeholder="0x… new owner address"
+                  value={newOwnerAddress}
+                  onChange={(e) => setNewOwnerAddress(e.target.value)}
+                  disabled={ownerStatus !== null && ownerStatus.stage !== "confirmed" && ownerStatus.stage !== "failed"}
+                />
+                <button
+                  className="btn"
+                  onClick={handleAddOwner}
+                  disabled={
+                    ownerStatus !== null && ownerStatus.stage !== "confirmed" && ownerStatus.stage !== "failed"
+                  }
+                >
+                  Add owner ({safeState.owners.length}/3)
+                </button>
+              </div>
+            )}
+            {isOwner && safeState.threshold === 1 && safeState.owners.length < 3 && (
+              <p className="hint" style={{ marginTop: "0.5rem" }}>
+                {safeState.owners.length === 1
+                  ? "Adds a 2nd owner, threshold stays 1-of-2 — you can still add the 3rd alone."
+                  : "Adds the 3rd owner and raises the threshold to 2-of-3 in the same call — after this, rebalances need 2 owners' approval."}
+              </p>
+            )}
+            <StatusTracker status={ownerStatus} />
           </>
         )}
       </section>
@@ -482,7 +577,12 @@ export default function Home() {
 
       <section className="ledger-section">
         <p className="section-label">Rebalance</p>
-        <p className="section-desc">Owner-only, works any time — no price condition to satisfy.</p>
+        <p className="section-desc">
+          Requires the Safe&apos;s full signature threshold ({threshold} of {safeState?.owners.length ?? 1}) —
+          `RebalanceModule.rebalance()` only accepts calls from the Safe itself, never a single
+          owner acting alone. Propose below; once enough owners have approved, it executes
+          automatically.
+        </p>
         <div className="swap-form">
           <input
             className="swap-input"
@@ -491,7 +591,7 @@ export default function Home() {
             step="0.01"
             value={amount}
             onChange={(e) => setAmount(e.target.value)}
-            disabled={isRunning}
+            disabled={multisig.isRunning}
           />
           <span className="swap-direction">
             {tokenIn.symbol}
@@ -499,15 +599,15 @@ export default function Home() {
               type="button"
               className="direction-toggle"
               onClick={() => setReversed((r) => !r)}
-              disabled={isRunning}
+              disabled={multisig.isRunning}
               aria-label="Reverse swap direction"
             >
               ⇄
             </button>
             {tokenOut.symbol}
           </span>
-          <button className="btn" onClick={handleRebalance} disabled={!account || isRunning}>
-            {isRunning ? "Swapping…" : "Swap via SaucerSwap"}
+          <button className="btn" onClick={handlePropose} disabled={!account || multisig.isRunning}>
+            {multisig.isRunning ? "Working…" : "Propose rebalance"}
           </button>
         </div>
 
@@ -531,7 +631,7 @@ export default function Home() {
               step="0.1"
               value={slippagePct}
               onChange={(e) => setSlippagePct(e.target.value)}
-              disabled={isRunning}
+              disabled={multisig.isRunning}
             />
             %
           </label>
@@ -542,7 +642,67 @@ export default function Home() {
           </p>
         )}
 
-        <StatusTracker status={status} />
+        {threshold > 1 && !multisig.proposal && (
+          <div className="swap-form" style={{ marginTop: "1rem" }}>
+            <textarea
+              className="swap-input"
+              style={{ width: "100%", minHeight: "3rem" }}
+              placeholder="Paste a proposal another owner shared, to review and approve it"
+              value={multisig.pasteInput}
+              onChange={(e) => multisig.setPasteInput(e.target.value)}
+            />
+            <button className="btn btn-secondary" onClick={() => multisig.loadProposal(multisig.pasteInput)}>
+              Load proposal
+            </button>
+          </div>
+        )}
+
+        {multisig.proposal && multisig.decoded && (
+          <div className="ledger-section" style={{ marginTop: "1rem" }}>
+            <p className="section-label">Pending proposal</p>
+            <div className="ledger-row">
+              <span className="ledger-key">Swap</span>
+              <span className="ledger-value">
+                {formatTokenAmount(multisig.decoded.tokenIn, multisig.decoded.amountIn)} → min{" "}
+                {formatTokenAmount(multisig.decoded.tokenOut, multisig.decoded.amountOutMin)}
+              </span>
+            </div>
+            <div className="ledger-row">
+              <span className="ledger-key">Deadline</span>
+              <span className="ledger-value">{new Date(multisig.decoded.deadline * 1000).toLocaleString()}</span>
+            </div>
+            <div className="ledger-row">
+              <span className="ledger-key">Approvals</span>
+              <span className="ledger-value">
+                <span className={`status-dot ${proposalMet ? "on" : "off"}`} />
+                {multisig.approvals.length} of {threshold}
+                {multisig.approvals.length > 0 ? ` (${multisig.approvals.join(", ")})` : ""}
+              </span>
+            </div>
+            <div className="swap-form" style={{ marginTop: "0.75rem" }}>
+              {isOwner && !multisig.approvals.some((o) => o.toLowerCase() === account?.toLowerCase()) && (
+                <button className="btn" onClick={handleApprove} disabled={multisig.isRunning}>
+                  Approve
+                </button>
+              )}
+              <button
+                className="btn"
+                onClick={handleExecuteNow}
+                disabled={multisig.isRunning || !proposalMet}
+              >
+                Execute now
+              </button>
+              <button className="btn btn-secondary" onClick={handleCopyProposal} disabled={multisig.isRunning}>
+                Copy proposal to share
+              </button>
+              <button className="btn btn-secondary" onClick={multisig.reset} disabled={multisig.isRunning}>
+                Discard
+              </button>
+            </div>
+          </div>
+        )}
+
+        <StatusTracker status={multisig.status} />
       </section>
 
       {priceGuardAddress && (

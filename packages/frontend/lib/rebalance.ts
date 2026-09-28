@@ -1,24 +1,21 @@
 import { ethers } from "ethers";
-import { getModuleAddress, type TreasuryToken } from "./safe";
-import { waitForMirrorNode, type RebalanceStatus } from "./txStatus";
+import type { TreasuryToken } from "./safe";
 
 export type { RebalanceStage, RebalanceStatus } from "./txStatus";
 export { hashscanTxUrl } from "./txStatus";
-
-const MODULE_ABI = [
-  "function rebalance(address tokenIn, address tokenOut, uint256 amountIn, uint256 amountOutMin, uint256 deadline) returns (uint256)"
-];
 
 const ROUTER_ABI = [
   "function getAmountsOut(uint256 amountIn, address[] calldata path) view returns (uint256[] memory amounts)"
 ];
 
-// Computed the instant the user clicks the button, before their wallet even opens a confirmation
+// Built the instant the user clicks "Propose", before their wallet even opens a confirmation
 // prompt — a slow or missed wallet popup eats directly into this window. 10 minutes proved too
 // tight in practice (a real testnet tx reverted with DeadlinePassed after a slow confirmation);
-// 30 minutes matches what most production swap UIs default to for the same reason.
-const DEADLINE_WINDOW_SECONDS = 1800;
-const DEFAULT_SLIPPAGE_BPS = 100; // 1%
+// 30 minutes matches what most production swap UIs default to for the same reason. A proposal
+// awaiting other owners' approval needs even more headroom than a single-click trigger did, so
+// this is a floor, not a fixed value — see the Rebalance section for how it's applied.
+export const DEADLINE_WINDOW_SECONDS = 1800;
+export const DEFAULT_SLIPPAGE_BPS = 100; // 1%
 
 export function getRouterAddress(): string {
   const address = process.env.NEXT_PUBLIC_SAUCERSWAP_ROUTER_ADDRESS;
@@ -51,56 +48,4 @@ export async function getQuote(
 export function applySlippage(amountOut: bigint, slippageBps: number): bigint {
   const bps = BigInt(Math.max(0, Math.min(10_000, Math.round(slippageBps))));
   return (amountOut * (10_000n - bps)) / 10_000n;
-}
-
-/**
- * Triggers a real rebalance: tokenIn -> tokenOut, in whichever direction the caller passes.
- * amountOutMin is computed from a fresh on-chain quote plus a slippage tolerance — never left
- * permissive, since an unbounded minimum accepts any output down to dust.
- */
-export async function triggerRebalance(
-  signer: ethers.Signer,
-  tokenIn: TreasuryToken,
-  tokenOut: TreasuryToken,
-  amountInHuman: string,
-  onStatus: (status: RebalanceStatus) => void,
-  slippageBps: number = DEFAULT_SLIPPAGE_BPS
-): Promise<void> {
-  const module = new ethers.Contract(getModuleAddress(), MODULE_ABI, signer);
-
-  const amountIn = ethers.parseUnits(amountInHuman, tokenIn.decimals);
-  const deadline = Math.floor(Date.now() / 1000) + DEADLINE_WINDOW_SECONDS;
-
-  onStatus({ stage: "submitting" });
-
-  let tx: ethers.ContractTransactionResponse;
-  try {
-    // Re-quote right before submitting — a quote shown earlier in the UI may be stale by the
-    // time the owner confirms in their wallet.
-    const provider = signer.provider;
-    if (!provider) throw new Error("Signer has no provider");
-    const quote = await getQuote(provider, tokenIn, tokenOut, amountInHuman);
-    const amountOutMin = applySlippage(quote.amountOut, slippageBps);
-
-    tx = await module.rebalance(tokenIn.address, tokenOut.address, amountIn, amountOutMin, deadline);
-  } catch (error) {
-    onStatus({ stage: "failed", error: (error as Error).message });
-    return;
-  }
-
-  onStatus({ stage: "pending", txHash: tx.hash });
-
-  try {
-    const receipt = await tx.wait();
-    if (!receipt || receipt.status !== 1) {
-      onStatus({ stage: "failed", txHash: tx.hash, error: "Transaction reverted" });
-      return;
-    }
-  } catch (error) {
-    onStatus({ stage: "failed", txHash: tx.hash, error: (error as Error).message });
-    return;
-  }
-
-  onStatus({ stage: "confirming", txHash: tx.hash });
-  await waitForMirrorNode(tx.hash, onStatus);
 }

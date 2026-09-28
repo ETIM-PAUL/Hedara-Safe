@@ -6,7 +6,15 @@ Guidance for AI coding agents extending this template.
 
 A Gnosis Safe multisig on Hedera, extended with two Safe modules:
 
-- `RebalanceModule.sol` — owner-triggered swap via the SaucerSwap router.
+- `RebalanceModule.sol` — Safe-quorum-triggered swap via the SaucerSwap router. `rebalance()`
+  requires `msg.sender == address(safe)` (the `onlySafe` modifier) — it does **not** accept a call
+  from any single owner's own account, however many owners exist or whatever the threshold is set
+  to. The only way to call it is a Safe `execTransaction` targeting the module, which already
+  means the Safe's configured signature threshold was met. See [Multisig: adding owners and
+  quorum-gated rebalances](../README.md#multisig-adding-owners-and-quorum-gated-rebalances) in the
+  README for the full mechanics (owner growth, proposal sharing, signature aggregation) — this is
+  a deliberate divergence from `PriceGuardedRebalanceModule`'s owner/permissionless gating, not an
+  oversight; see why below.
 - `PriceGuardedRebalanceModule.sol` — permissionless to call, but only executes when a live price
   condition (configured by the Safe owner) holds. The oracle backing it is swappable at runtime
   between any deployed `IPriceOracleAdapter` — Chainlink and Supra adapters exist under
@@ -24,7 +32,12 @@ something to refactor.
 
 ## Where things live
 
-- `packages/contracts/contracts/RebalanceModule.sol` — owner-only manual swap trigger.
+- `packages/contracts/contracts/RebalanceModule.sol` — Safe-only manual swap trigger (see above).
+  The `Rebalanced` event's `triggeredBy` field is always `address(safe)` now, not an individual
+  owner's address — the Safe itself is the caller by construction, so there's no other value it
+  could meaningfully carry; don't try to thread an "actual executor" through here without adding
+  real signature-recovery logic, since `tx.origin` is not a trustworthy substitute (a relayer could
+  submit on an owner's behalf).
 - `packages/contracts/contracts/PriceGuardedRebalanceModule.sol` — permissionless, price-gated
   swap trigger. Reads its oracle only through `IPriceOracleAdapter` — never import a specific
   oracle SDK (Pyth, Chainlink, Supra) directly in this file. Uses `viaIR` (see the `overrides`
@@ -54,7 +67,11 @@ something to refactor.
 - `packages/contracts/contracts/mocks/` — test doubles (`MockSafe`, `MockERC20`,
   `MockSaucerSwapRouter`, `MockOracleAdapter` for module-level tests, `MockChainlinkAggregator`,
   `MockSupraStorage`) used only by `test/`. Never referenced by a deploy script or the frontend —
-  if a mock leaks into a non-test file, that's a bug.
+  if a mock leaks into a non-test file, that's a bug. `RebalanceModule.test.ts`'s happy-path tests
+  impersonate `MockSafe`'s own address (`hardhat_impersonateAccount` + `hardhat_setBalance`) to
+  simulate a call arriving with `msg.sender == address(safe)`, rather than adding real Safe
+  signature-verification logic to the mock — that's what a real Safe already does, so testing it
+  again in the mock would just be testing the mock.
 - `packages/contracts/scripts/deploy.ts` — deployment sequence: Safe singleton → `SafeProxyFactory`
   → Safe proxy → `RebalanceModule` → enable module on Safe. Keep this order; the module can't be
   enabled before the Safe proxy exists. `enableModule` only runs automatically for a 1-of-1,
@@ -71,16 +88,32 @@ something to refactor.
   `switchOracleAndTrigger()` to Supra — one signed transaction doing both the switch and the swap.
   Decode the resulting receipt's logs if you need to confirm that (see README's proof section for
   exactly how) rather than trusting the script's own console output.
+- `packages/contracts/scripts/deploy-multisig-rebalance.ts` — deploys a fresh `RebalanceModule`
+  (required: the old deployed one still has `onlySafeOwner` bytecode and would revert if called
+  via `execTransaction`), grows the Safe to 3 owners, raises the threshold to 2-of-3, and proves a
+  real quorum-gated rebalance — including a deliberate premature-execution attempt with only 1 of
+  2 required approvals, which must revert. Needs `OWNER2_ADDRESS`/`OWNER2_KEY`/`OWNER3_ADDRESS` in
+  `.env` (two funded throwaway testnet accounts) — this is the one script in this repo that needs
+  more than the single operator key, since proving a quorum requires genuinely different signers.
 - `packages/frontend/lib/` — `wallet.ts` (EIP-1193 connect/disconnect + Hedera testnet chain
-  add/switch), `safe.ts` (Safe/treasury reads), `rebalance.ts` (`RebalanceModule` trigger, quotes,
-  slippage), `priceGuard.ts` (`PriceGuardedRebalanceModule` state + trigger — `triggerPriceGuard()`
+  add/switch), `safe.ts` (Safe/treasury reads — kept read-only by convention; anything that sends
+  a Safe transaction lives in `multisig.ts` instead), `rebalance.ts` (SaucerSwap quote/slippage
+  helpers only now — `RebalanceModule`'s old single-owner trigger function was removed from here
+  when `rebalance()` became Safe-only; see `multisig.ts`), `multisig.ts` (owner management —
+  `addOwner()` — and the propose/approve/execute machinery for quorum-gated rebalances: builds the
+  exact Safe transaction, gets owners' `approveHash()` on-chain, aggregates their approved-hash
+  signatures once threshold is met, and submits `execTransaction`; see the README's "Multisig"
+  section for why this exists and how proposals travel between owners without a backend),
+  `useMultisigRebalance.ts` (the hook the Rebalance section's UI state machine is built from —
+  building/loading a proposal, tracking approvals, auto-executing the moment threshold is met),
+  `priceGuard.ts` (`PriceGuardedRebalanceModule` state + trigger — `triggerPriceGuard()`
   picks `trigger()` vs. `switchOracleAndTrigger()` automatically based on whether the selected
   oracle differs from the active one, and `getOracleOptions()` is driven entirely by which
   `NEXT_PUBLIC_*_ADAPTER_ADDRESS` vars are set, not hardcoded), `usePriceGuard.ts` (the hook the
   guard section is built from — state fetch, direction toggle, oracle preview, trigger handler;
   kept separate from `PriceGuardSection` so a second guard instance could be added without
   duplicating this logic, if one is ever needed),
-  `txStatus.ts` (shared status-stage type and mirror-node polling both trigger flows use — add new
+  `txStatus.ts` (shared status-stage type and mirror-node polling every trigger flow uses — add new
   trigger flows on top of this rather than duplicating the polling loop). Keep contract calls in
   `lib/`, not inline in `app/page.tsx` — the page should stay presentation-only.
   Every `NEXT_PUBLIC_*` var must be read as a static `process.env.NEXT_PUBLIC_X` expression
@@ -108,6 +141,14 @@ something to refactor.
   (here, the Safe owner) may change it. `trigger()` takes no oracle argument for exactly this
   reason: a caller-supplied oracle address could point at a contract that always reports the
   condition as met.
+- Decide deliberately between `onlySafeOwner` (`safe.isOwner(msg.sender)` — any single owner acts
+  alone, regardless of threshold) and `onlySafe` (`msg.sender == address(safe)` — requires a real
+  quorum-approved `execTransaction`) for any new owner-gated function; don't default to whichever
+  is less code. `RebalanceModule` uses `onlySafe` because moving treasury funds should require the
+  Safe's actual signature threshold. `PriceGuardedRebalanceModule` uses `onlySafeOwner` for
+  `setOracle()`/`switchOracleAndTrigger()` because the price condition is what's supposed to be the
+  safety property, not who calls it — adding a quorum requirement there would slow down a module
+  designed to be fast and permissionless without making it any safer.
 
 ## What NOT to do
 

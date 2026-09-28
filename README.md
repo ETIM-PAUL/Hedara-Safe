@@ -3,7 +3,12 @@
 A Gnosis Safe multisig treasury on Hedera, with two Safe modules that rebalance idle treasury
 holdings through [SaucerSwap](https://www.saucerswap.finance/):
 
-- **`RebalanceModule`** — an owner triggers a swap directly, any time.
+- **`RebalanceModule`** — the Safe's configured signature threshold triggers a swap, any time.
+  `rebalance()` only accepts calls from the Safe itself (`msg.sender == address(safe)`) — never a
+  single owner acting alone — so a 2-of-3 Safe genuinely needs 2 owners' approval to move funds
+  this way. See [Multisig: adding owners and quorum-gated
+  rebalances](#multisig-adding-owners-and-quorum-gated-rebalances) for how that works without a
+  backend to relay signatures.
 - **`PriceGuardedRebalanceModule`** — permissionless to call, but only executes when a live price
   condition holds. Anyone (a keeper bot, a cron job) can call `trigger()`; the price is the guard,
   not the caller. The oracle backing it isn't fixed: it reads through a common
@@ -37,9 +42,14 @@ adapter has no condition to gate on — it'd just be `RebalanceModule` again, ba
   combined `switchOracleAndTrigger()` to Supra in one signed call — see the proof below.
 - `packages/contracts/scripts/demo-rebalance.ts` — seeds the deployed Safe and triggers a real
   swap through `RebalanceModule` (Phase 7 — produced the transaction below).
-- `packages/frontend` — Next.js app: wallet connect, a read-only Safe/treasury ledger, a
-  rebalance-trigger flow, and a price-guard section (`lib/usePriceGuard.ts` is the hook behind
-  it), all reading the real deployed contracts.
+- `packages/contracts/scripts/deploy-multisig-rebalance.ts` — deploys a fresh `RebalanceModule`,
+  grows the Safe from 1 to 3 owners, raises the threshold to 2-of-3, and proves a real
+  quorum-gated rebalance (including a deliberate premature-execution attempt that must revert) —
+  see [Multisig](#multisig-adding-owners-and-quorum-gated-rebalances) below.
+- `packages/frontend` — Next.js app: wallet connect, a read-only Safe/treasury ledger, an
+  owner-management flow, a quorum-gated rebalance flow (`lib/multisig.ts` +
+  `lib/useMultisigRebalance.ts`), and a price-guard section (`lib/usePriceGuard.ts`), all reading
+  the real deployed contracts.
 
 ## Prerequisites
 
@@ -64,7 +74,8 @@ Then fill in `.env`:
 | `SAUCERSWAP_ROUTER_ADDRESS` | The V1 router's EVM address. On testnet: `0x0000000000000000000000000000000000004b40` (contract `0.0.19264` — resolve the EVM form of any Hedera contract ID via `GET https://testnet.mirrornode.hedera.com/api/v1/contracts/{id}`) |
 | `NEXT_PUBLIC_SAUCERSWAP_ROUTER_ADDRESS` | Same address as above, exposed to the browser — the frontend uses it for live swap quotes via `getAmountsOut` |
 | `NEXT_PUBLIC_SAFE_ADDRESS`  | Printed by `deploy.ts` below — leave blank until you've deployed                                                                                                                                                                    |
-| `NEXT_PUBLIC_MODULE_ADDRESS` | Also printed by `deploy.ts` — the `RebalanceModule` address |
+| `NEXT_PUBLIC_MODULE_ADDRESS` | Also printed by `deploy.ts` — the `RebalanceModule` address. If you also run `deploy-multisig-rebalance.ts`, update this to the address it prints — that script deploys a new module instance |
+| `OWNER2_ADDRESS` / `OWNER2_KEY` / `OWNER3_ADDRESS` | Only needed for `deploy-multisig-rebalance.ts` — two throwaway testnet EVM accounts (funded with a little HBAR) that become the Safe's 2nd and 3rd owners for the quorum proof |
 | `NEXT_PUBLIC_PRICE_GUARD_MODULE_ADDRESS` | Printed by `deploy-oracle-adapters.ts` — optional, the Price Guard UI section hides itself if unset |
 | `NEXT_PUBLIC_CHAINLINK_ADAPTER_ADDRESS` / `NEXT_PUBLIC_SUPRA_ADAPTER_ADDRESS` | Also printed by `deploy-oracle-adapters.ts` — only the ones set show up as switch options in the UI |
 
@@ -93,10 +104,18 @@ npm run dev
 Open http://localhost:3000. Connect any EIP-1193 wallet (MetaMask, HashPack, or Blade in EVM
 mode — Hedera testnet is a standard EVM chain, so no HashConnect SDK is needed) and it prompts to
 add/switch to Hedera testnet automatically. Once connected, the page reads the Safe's owners,
-threshold, module status, and live treasury balances, and gives you two ways to move funds:
+threshold, module status, and live treasury balances. If the Safe is still 1-of-N and you're an
+owner, an **Add owner** field lets you grow it toward 3 owners (see
+[Multisig](#multisig-adding-owners-and-quorum-gated-rebalances) below). It also gives you two ways
+to move funds:
 
-- **Rebalance** — owner-triggered, either direction (a toggle flips `tokenIn`/`tokenOut`), with a
-  live SaucerSwap quote and a slippage % control that computes a real `amountOutMin`.
+- **Rebalance** — requires the Safe's full signature threshold, either direction (a toggle flips
+  `tokenIn`/`tokenOut`), with a live SaucerSwap quote and a slippage % control that computes a real
+  `amountOutMin`. **Propose rebalance** builds the exact Safe transaction and casts your own
+  approval; if that alone meets the threshold (a 1-of-N Safe), it executes immediately in the same
+  click. Otherwise a **Copy proposal to share** button gives you a blob to send the other owners
+  out of band — they paste it into **Load proposal** to review the decoded swap details and
+  approve from their own wallet. Once enough approvals exist, anyone can hit **Execute now**.
 - **Price Guard** — shows `PriceGuardedRebalanceModule`'s configured trigger condition (labeled
   `Condition (HBAR/USD)` — it's explicitly not a SAUCE price condition; WHBAR is Hedera's native
   token 1:1 wrapped, so its dollar value tracks HBAR/USD directly, which is what actually gates
@@ -120,12 +139,13 @@ has permission to make the Safe act.
 
 ```mermaid
 flowchart LR
-    Owner(["Owner EOA"])
+    Owners(["Owners\n(quorum-approved\nexecTransaction)"])
     Module["RebalanceModule\n(enabled on Safe)"]
     Safe[["Gnosis Safe\n(holds treasury)"]]
     Router["SaucerSwap V1 Router\n(Hedera testnet)"]
 
-    Owner -- "rebalance(tokenIn, tokenOut, amountIn, amountOutMin, deadline)" --> Module
+    Owners -- "execTransaction(to=Module, data=rebalance(...))" --> Safe
+    Safe -- "as msg.sender == Safe" --> Module
     Module -- "execTransactionFromModule:\napprove(router, amountIn)" --> Safe
     Module -- "execTransactionFromModule:\nswapExactTokensForTokens(...)" --> Safe
     Safe -- "as msg.sender" --> Router
@@ -138,10 +158,14 @@ never leave Safe custody even mid-swap. Removing SaucerSwap from this picture re
 the module exists; a Safe with no module is just a stock deployment, which is the gap this
 template fills.
 
-**Trigger flow in one call.** `rebalance()` does two things transactionally: it makes the Safe
-`approve` the router for `amountIn`, then makes the Safe call `swapExactTokensForTokens`. Both
-calls happen from `msg.sender == Safe`'s perspective, since `execTransactionFromModule` executes
-_as_ the Safe, not as the module.
+**Trigger flow, two hops deep.** `rebalance()` only accepts calls from the Safe itself
+(`msg.sender == address(safe)`) — so calling it at all already means the Safe's owners met their
+signature threshold over an `execTransaction` targeting the module. Once inside, `rebalance()`
+does two more things transactionally: it makes the Safe `approve` the router for `amountIn`, then
+makes the Safe call `swapExactTokensForTokens`, both via `execTransactionFromModule` (which
+executes _as_ the Safe, not as the module — a second, module-authorized hop that needs no further
+signatures, since the module is already enabled). See [Multisig](#multisig-adding-owners-and-quorum-gated-rebalances)
+for why this differs from `PriceGuardedRebalanceModule`'s single-owner-or-permissionless gating.
 
 **The price-guarded path** is the same Safe-custody mechanism, with an oracle-agnostic guard in
 front of it:
@@ -200,6 +224,11 @@ router, converting the Safe's WHBAR into SAUCE:
 - Result: Safe swapped 2.5 WHBAR for 1.37386050 SAUCE via the SaucerSwap V1 HBAR-SAUCE pool
 - Reproduce with `packages/contracts/scripts/demo-rebalance.ts` — see script header for what it does (HTS association, WHBAR wrap, funding the Safe, then triggering the module)
 
+This transaction predates the quorum-gating change — see
+[Multisig](#multisig-adding-owners-and-quorum-gated-rebalances) below for the current
+`RebalanceModule`, which requires the Safe's own signature over `execTransaction`, not a single
+owner calling it directly.
+
 **`PriceGuardedRebalanceModule` with switchable oracles** — deployed at
 [`0x1076c12c4b870AA2aBCb1Eda468FC3e2dECe258D`](https://hashscan.io/testnet/contract/0x1076c12c4b870AA2aBCb1Eda468FC3e2dECe258D),
 enabled on the Safe, and put through both trigger paths against two live, independently verified
@@ -236,6 +265,62 @@ testnet contract's last-pushed price — sometimes weeks stale. Chainlink and Su
 limitation: both are push-model with no off-chain step required at all, which is a strictly better
 fit for a module whose whole point is a permissionless, no-friction trigger. The
 `IPriceOracleAdapter` interface still supports pull-model oracles if one is ever worth adding back.
+
+## Multisig: adding owners and quorum-gated rebalances
+
+The Safe starts 1-of-1 (deployer-owned) for a frictionless demo, but a Safe's whole point is
+multi-owner custody. Two pieces make that real here: growing the owner set, and making
+`RebalanceModule.rebalance()` actually require the resulting threshold rather than letting any one
+owner bypass it.
+
+**Growing from 1 to 3 owners.** `Safe.addOwnerWithThreshold(owner, threshold)` is
+`SelfAuthorized` — callable only via the Safe's own `execTransaction`, never directly. While the
+Safe is still 1-of-N, a single owner can submit that `execTransaction` alone using the "approved
+hash" signature scheme (`v=1, r=owner, s=0`, valid whenever `msg.sender == owner` — no real ECDSA
+signing needed; see `packages/frontend/lib/multisig.ts`'s `addOwner()`). Going from 1 to 3 owners
+is two such calls: the first adds owner 2 and keeps the threshold at 1 (so owner 1 can still act
+alone for the second call); the second adds owner 3 and raises the threshold to 2 in the same
+call — the new threshold only takes effect once that call has already executed, so both additions
+stay a single click for owner 1. The frontend's **Add owner** field in the Safe section computes
+which of these two calls applies automatically from the current owner count.
+
+**Why `rebalance()` needed to change, not just the owner count.** Before this, `rebalance()` was
+`onlySafeOwner` — it checked `safe.isOwner(msg.sender)` directly, meaning *any single owner* could
+call it from their own wallet regardless of the Safe's threshold. Raising the threshold to 2-of-3
+would have added owners without changing that at all. `rebalance()` now requires
+`msg.sender == address(safe)` instead (see `RebalanceModule.sol`'s `onlySafe` modifier) — the only
+way to satisfy that is a real Safe transaction that already met quorum. `PriceGuardedRebalanceModule`
+deliberately keeps its old single-owner-or-permissionless gating (see "Conventions" in
+[AGENTS.md](AGENTS.md)) — a price guard's safety property is the price condition itself, not who
+calls it, so requiring a quorum there would add friction without adding safety.
+
+**No backend to relay signatures, so proposals travel as a copyable blob.** Safe's own
+`approveHash(bytes32)` lets each owner record their approval on-chain from their own wallet/session
+— no coordination server needed. What's missing is a way for owner 2 to know *which* transaction
+owner 1 wants approved: the frontend's **Propose rebalance** button builds the exact
+`(to, data, nonce)` tuple, gets owner 1's approval, and offers a **Copy proposal to share** button
+(a base64 blob of those three fields — nothing recomputed from a live quote, so every owner
+reviews and approves bit-for-bit the same transaction). Owner 2 pastes it into **Load proposal**,
+which decodes the raw calldata back into a human-readable summary (token amounts, deadline) before
+they approve. The moment an approval crosses the threshold — whether that's the proposer's own
+approval on a 1-of-N Safe, or the last owner needed on a 2-of-3 one — execution fires automatically
+in that same click, using every approving owner's on-chain-recorded `approvedHashes` entry as their
+signature (aggregated and sorted by address, per `Safe.checkNSignatures`).
+
+**Verified on real testnet:** `packages/contracts/scripts/deploy-multisig-rebalance.ts` deploys a
+fresh `RebalanceModule` (required — the old deployed one still has `onlySafeOwner` bytecode and
+would revert if called via `execTransaction`), grows the Safe to 3 owners, raises the threshold to
+2-of-3, and proves the quorum end to end — including a deliberate attempt to execute with only 1
+of 2 required approvals, which reverts, before the real 2-signature execution:
+
+- New `RebalanceModule`: [`0x13642c65E863CdEc489999cf92Ef45c82d9c4Ac4`](https://hashscan.io/testnet/contract/0x13642c65E863CdEc489999cf92Ef45c82d9c4Ac4), enabled on the Safe
+- Safe grown to 3 owners, threshold 2-of-3: `0x07E1128d...`, `0x2D915DB9...`, and the original deployer
+- Premature execution (1 of 2 approvals) — reverted with **`GS020`** (Safe's own "not enough valid signatures" error), confirming the quorum is actually enforced, not just configured
+- Real execution (2 of 2 approvals) tx: [`0xe9adf250e926ab334a4913e4c777988507841cfce4a8eec7b9dfcc917bef87f3`](https://hashscan.io/testnet/transaction/0xe9adf250e926ab334a4913e4c777988507841cfce4a8eec7b9dfcc917bef87f3) — `status: 0x1` (SUCCESS), independently confirmed via mirror node
+- Result: Safe swapped 0.5 WHBAR for **27.472083 SAUCE** — read directly from the SAUCE token's `Transfer` log in this transaction's mirror-node receipt, not inferred from a before/after balance diff (the Safe's balances carry residue from earlier proofs in this repo's history)
+
+Reproduce with `packages/contracts/scripts/deploy-multisig-rebalance.ts` — see [Reproducing the
+multisig proof](#reproducing-the-multisig-proof) below.
 
 ## Off-chain limit orders were considered and ruled out
 
@@ -297,6 +382,48 @@ Requires the Safe to already hold some WHBAR (see `demo-rebalance.ts` above to f
 printed addresses into `.env` as `NEXT_PUBLIC_PRICE_GUARD_MODULE_ADDRESS`,
 `NEXT_PUBLIC_CHAINLINK_ADAPTER_ADDRESS`, and `NEXT_PUBLIC_SUPRA_ADAPTER_ADDRESS` to see the new
 module and its switch options in the frontend.
+
+## Reproducing the multisig proof
+
+```bash
+SAFE_ADDRESS=<from NEXT_PUBLIC_SAFE_ADDRESS> \
+SAUCERSWAP_ROUTER_ADDRESS=<from .env> \
+OWNER2_ADDRESS=<a 2nd testnet EVM address> OWNER2_KEY=<its private key> \
+OWNER3_ADDRESS=<a 3rd testnet EVM address> \
+npx hardhat run packages/contracts/scripts/deploy-multisig-rebalance.ts --network hedera-testnet
+```
+
+`OWNER2` and `OWNER3` need a small amount of testnet HBAR each (Hedera auto-creates the account on
+first transfer in) — they only pay gas for a couple of `approveHash()` calls. This is what
+produced the proof above. It, in order:
+
+1. Deploys a fresh `RebalanceModule` (see why above) and enables it on the Safe.
+2. Adds owner 2 (threshold stays 1-of-2), then owner 3 (threshold rises to 2-of-3) — skipped if
+   they're already owners, so a re-run after a partial failure doesn't try to re-add them.
+3. Builds a real rebalance proposal and gets owner 1's `approveHash()` on-chain.
+4. Deliberately attempts `execTransaction` with only that one approval — this must revert, or the
+   quorum isn't actually being enforced.
+5. Gets owner 2's `approveHash()` — a genuinely different private key.
+6. Executes with both owners' signatures aggregated into one `execTransaction` call.
+
+Every Safe-changing step (including enabling the module) is routed through the same
+threshold-aware helper, so the script works correctly whether the Safe is still 1-of-1, mid-way at
+1-of-2, or already at the final 2-of-3 — which mattered in practice: enabling the module the first
+time only needed owner 1's approval, but a second run (after fixing an unrelated gas-price issue
+below) hit a Safe that was *already* 2-of-3 from the first run's owner-growth steps, so enabling
+required both owners' approval that time. A script that assumed "always 1 owner" would have broken
+on that second run.
+
+**A real lesson from getting this proof:** a manually-constructed `ethers.Wallet` (owner 2's key,
+not one of Hardhat's own configured signers) submitted `approveHash()` with ethers' default gas
+estimation and got `Gas price '218' is below configured minimum gas price '1140000000000'` from
+Hashio's relay. Hardhat's own signers get a working gas price injected automatically; a raw
+`ethers.Wallet` connected directly to the provider does not — it needs an explicit `gasPrice`
+override (`(await provider.getFeeData()).gasPrice`, doubled for headroom).
+
+Requires the Safe to already hold some WHBAR (see `demo-rebalance.ts` above to fund it). Copy the
+printed address into `.env` as `NEXT_PUBLIC_MODULE_ADDRESS` — the old one still works for reading
+state but its `rebalance()` is now incompatible with the frontend's quorum flow.
 
 ## License
 
