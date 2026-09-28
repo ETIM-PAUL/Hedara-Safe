@@ -221,11 +221,11 @@ export async function executeProposal(
   proposal: RebalanceProposal,
   approvedOwners: string[],
   onStatus: (status: RebalanceStatus) => void
-): Promise<void> {
+): Promise<boolean> {
   const safe = safeContract(signer);
   const signatures = buildApprovedHashSignatures(approvedOwners);
 
-  await runSafeTx(
+  return runSafeTx(
     () =>
       safe.execTransaction(
         proposal.to,

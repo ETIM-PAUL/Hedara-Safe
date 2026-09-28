@@ -17,9 +17,10 @@ import type { RebalanceStatus } from "./txStatus";
 /**
  * State machine behind the Rebalance section once `rebalance()` requires the Safe's own
  * signature quorum (see multisig.ts): build or load a proposal, track which owners have
- * approved its hash on-chain, and execute the moment enough of them have — automatically, if the
- * approval that just landed is the one that crosses the threshold, so a 1-of-N Safe still feels
- * like a single click.
+ * approved its hash on-chain, and execute it. Approving and executing are always two separate,
+ * explicit actions — even when an approval happens to cross the threshold, execution still needs
+ * its own click via `executeNow()`, so a wallet confirmation for "approve" never silently becomes
+ * a second wallet confirmation for "move the treasury's funds."
  */
 export function useMultisigRebalance(params: {
   provider: BrowserProvider | null;
@@ -73,7 +74,7 @@ export function useMultisigRebalance(params: {
 
     await approveProposal(signer, txHash, setStatus);
     const current = await refreshApprovals(txHash);
-    await maybeAutoExecute(signer, built, current, txHash);
+    notifyApprovalOutcome(current);
   }
 
   /** Loads a proposal another owner shared out of band (there's no backend to relay it) — decodes
@@ -97,24 +98,17 @@ export function useMultisigRebalance(params: {
     if (!provider || !proposal || !hash) return;
     await approveProposal(signer, hash, setStatus);
     const current = await refreshApprovals(hash);
-    await maybeAutoExecute(signer, proposal, current, hash);
+    notifyApprovalOutcome(current);
   }
 
-  async function maybeAutoExecute(
-    signer: import("ethers").Signer,
-    activeProposal: RebalanceProposal,
-    currentApprovals: string[],
-    currentHash: string
-  ) {
+  function notifyApprovalOutcome(currentApprovals: string[]) {
     if (currentApprovals.length < threshold) {
       setToast(
         `Approved — waiting for ${threshold - currentApprovals.length} more owner approval(s) before this can execute.`
       );
-      return;
+    } else {
+      setToast("Approved — threshold met. Click \"Execute now\" to send the swap.");
     }
-    await executeProposal(signer, activeProposal, currentApprovals, setStatus);
-    if (provider) await refreshApprovals(currentHash);
-    await onConfirmed();
   }
 
   async function executeNow(signer: import("ethers").Signer) {
@@ -124,7 +118,8 @@ export function useMultisigRebalance(params: {
       setToast(`Still need ${threshold - current.length} more owner approval(s).`);
       return;
     }
-    await executeProposal(signer, proposal, current, setStatus);
+    const executed = await executeProposal(signer, proposal, current, setStatus);
+    if (executed) reset();
     await onConfirmed();
   }
 

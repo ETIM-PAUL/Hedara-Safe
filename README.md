@@ -112,10 +112,12 @@ to move funds:
 - **Rebalance** — requires the Safe's full signature threshold, either direction (a toggle flips
   `tokenIn`/`tokenOut`), with a live SaucerSwap quote and a slippage % control that computes a real
   `amountOutMin`. **Propose rebalance** builds the exact Safe transaction and casts your own
-  approval; if that alone meets the threshold (a 1-of-N Safe), it executes immediately in the same
-  click. Otherwise a **Copy proposal to share** button gives you a blob to send the other owners
-  out of band — they paste it into **Load proposal** to review the decoded swap details and
-  approve from their own wallet. Once enough approvals exist, anyone can hit **Execute now**.
+  approval. Approving and executing are always two separate, explicit actions — even on a 1-of-N
+  Safe where your own approval already meets the threshold, nothing moves until you separately
+  click **Execute now**, so one wallet confirmation never silently becomes two. A **Copy proposal
+  to share** button gives you a blob to send the other owners out of band; they paste it into
+  **Load proposal** to review the decoded swap details before approving from their own wallet.
+  Once enough approvals exist, anyone can hit **Execute now**.
 - **Price Guard** — shows `PriceGuardedRebalanceModule`'s configured trigger condition (labeled
   `Condition (HBAR/USD)` — it's explicitly not a SAUCE price condition; WHBAR is Hedera's native
   token 1:1 wrapped, so its dollar value tracks HBAR/USD directly, which is what actually gates
@@ -302,10 +304,12 @@ owner 1 wants approved: the frontend's **Propose rebalance** button builds the e
 (a base64 blob of those three fields — nothing recomputed from a live quote, so every owner
 reviews and approves bit-for-bit the same transaction). Owner 2 pastes it into **Load proposal**,
 which decodes the raw calldata back into a human-readable summary (token amounts, deadline) before
-they approve. The moment an approval crosses the threshold — whether that's the proposer's own
-approval on a 1-of-N Safe, or the last owner needed on a 2-of-3 one — execution fires automatically
-in that same click, using every approving owner's on-chain-recorded `approvedHashes` entry as their
-signature (aggregated and sorted by address, per `Safe.checkNSignatures`).
+they approve. Approving never auto-executes, even when that approval happens to meet the
+threshold — an **Execute now** button (enabled only once enough approvals exist) submits
+`execTransaction` as its own explicit step, using every approving owner's on-chain-recorded
+`approvedHashes` entry as their signature (aggregated and sorted by address, per
+`Safe.checkNSignatures`). Keeping "approve" and "execute" as two separate actions means a wallet
+confirmation for the former never silently becomes a second confirmation moving real funds.
 
 **Verified on real testnet:** `packages/contracts/scripts/deploy-multisig-rebalance.ts` deploys a
 fresh `RebalanceModule` (required — the old deployed one still has `onlySafeOwner` bytecode and

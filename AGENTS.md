@@ -105,7 +105,10 @@ something to refactor.
   signatures once threshold is met, and submits `execTransaction`; see the README's "Multisig"
   section for why this exists and how proposals travel between owners without a backend),
   `useMultisigRebalance.ts` (the hook the Rebalance section's UI state machine is built from —
-  building/loading a proposal, tracking approvals, auto-executing the moment threshold is met),
+  building/loading a proposal, tracking approvals, executing. Approving and executing are always
+  two separate calls, even when an approval happens to meet the threshold — don't reintroduce
+  auto-chaining approve straight into execute; a wallet confirmation for "approve" should never
+  silently become a second confirmation that moves treasury funds),
   `priceGuard.ts` (`PriceGuardedRebalanceModule` state + trigger — `triggerPriceGuard()`
   picks `trigger()` vs. `switchOracleAndTrigger()` automatically based on whether the selected
   oracle differs from the active one, and `getOracleOptions()` is driven entirely by which
