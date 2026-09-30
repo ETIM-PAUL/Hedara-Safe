@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { BrowserProvider } from "ethers";
 import {
   buildRebalanceProposal,
@@ -7,12 +7,19 @@ import {
   encodeProposal,
   getApprovals,
   getProposalHash,
+  getSafeNonce,
   approveProposal,
   executeProposal,
   type RebalanceProposal,
   type DecodedRebalance
 } from "./multisig";
 import type { RebalanceStatus } from "./txStatus";
+
+// How often the "is this proposal still valid" check re-runs while one is pending — cheap reads
+// (nonce, approvedHashes), and a stale proposal sitting unnoticed for a while is exactly the
+// failure mode this exists to catch. The deadline check also needs a ticking clock independent of
+// any on-chain read, since a deadline can pass without any new block prompting a re-render.
+const STALE_CHECK_INTERVAL_MS = 15_000;
 
 /**
  * State machine behind the Rebalance section once `rebalance()` requires the Safe's own
@@ -37,8 +44,47 @@ export function useMultisigRebalance(params: {
   const [approvals, setApprovals] = useState<string[]>([]);
   const [pasteInput, setPasteInput] = useState("");
   const [status, setStatus] = useState<RebalanceStatus | null>(null);
+  const [currentNonce, setCurrentNonce] = useState<bigint | null>(null);
+  const [now, setNow] = useState(() => Date.now());
 
   const isRunning = status !== null && status.stage !== "confirmed" && status.stage !== "failed";
+
+  // A pending proposal can go stale two ways: its deadline passes (execution would revert with
+  // DeadlinePassed), or another Safe transaction executes in the meantime, bumping the nonce its
+  // hash was built against (execution would revert on signature/hash mismatch). Neither shows up
+  // on its own — the deadline needs a ticking clock, the nonce needs a fresh on-chain read.
+  const isExpired = decoded !== null && decoded.deadline * 1000 <= now;
+  const isStaleNonce = proposal !== null && currentNonce !== null && BigInt(proposal.nonce) !== currentNonce;
+  const isStale = isExpired || isStaleNonce;
+
+  useEffect(() => {
+    if (!proposal) return;
+    const timer = setInterval(() => setNow(Date.now()), STALE_CHECK_INTERVAL_MS);
+    return () => clearInterval(timer);
+  }, [proposal]);
+
+  useEffect(() => {
+    if (!proposal || !provider) {
+      setCurrentNonce(null);
+      return;
+    }
+    let cancelled = false;
+    const check = () => {
+      getSafeNonce(provider)
+        .then((n) => {
+          if (!cancelled) setCurrentNonce(n);
+        })
+        .catch(() => {
+          /* transient RPC hiccup — next interval tick will retry */
+        });
+    };
+    check();
+    const timer = setInterval(check, STALE_CHECK_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [proposal, provider]);
 
   function reset() {
     setProposal(null);
@@ -46,6 +92,7 @@ export function useMultisigRebalance(params: {
     setHash(null);
     setApprovals([]);
     setPasteInput("");
+    setCurrentNonce(null);
   }
 
   async function refreshApprovals(currentHash: string) {
@@ -96,6 +143,10 @@ export function useMultisigRebalance(params: {
 
   async function approve(signer: import("ethers").Signer) {
     if (!provider || !proposal || !hash) return;
+    if (isStale) {
+      setToast("This proposal is stale — discard it and propose again.");
+      return;
+    }
     await approveProposal(signer, hash, setStatus);
     const current = await refreshApprovals(hash);
     notifyApprovalOutcome(current);
@@ -113,6 +164,10 @@ export function useMultisigRebalance(params: {
 
   async function executeNow(signer: import("ethers").Signer) {
     if (!provider || !proposal || !hash) return;
+    if (isStale) {
+      setToast("This proposal is stale — discard it and propose again.");
+      return;
+    }
     const current = await refreshApprovals(hash);
     if (current.length < threshold) {
       setToast(`Still need ${threshold - current.length} more owner approval(s).`);
@@ -132,6 +187,9 @@ export function useMultisigRebalance(params: {
     setPasteInput,
     status,
     isRunning,
+    isExpired,
+    isStaleNonce,
+    isStale,
     propose,
     loadProposal,
     approve,

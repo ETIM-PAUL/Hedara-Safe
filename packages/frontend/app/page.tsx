@@ -658,7 +658,7 @@ export default function Home() {
         )}
 
         {multisig.proposal && multisig.decoded && (
-          <div className="ledger-section" style={{ marginTop: "1rem" }}>
+          <div className={`ledger-card${multisig.isStale ? " stale" : ""}`}>
             <p className="section-label">Pending proposal</p>
             <div className="ledger-row">
               <span className="ledger-key">Swap</span>
@@ -669,7 +669,10 @@ export default function Home() {
             </div>
             <div className="ledger-row">
               <span className="ledger-key">Deadline</span>
-              <span className="ledger-value">{new Date(multisig.decoded.deadline * 1000).toLocaleString()}</span>
+              <span className="ledger-value">
+                {new Date(multisig.decoded.deadline * 1000).toLocaleString()}
+                {multisig.isExpired ? " — passed" : ""}
+              </span>
             </div>
             <div className="ledger-row">
               <span className="ledger-key">Approvals</span>
@@ -679,25 +682,42 @@ export default function Home() {
                 {multisig.approvals.length > 0 ? ` (${multisig.approvals.join(", ")})` : ""}
               </span>
             </div>
-            <div className="swap-form" style={{ marginTop: "0.75rem" }}>
-              {isOwner && !multisig.approvals.some((o) => o.toLowerCase() === account?.toLowerCase()) && (
-                <button className="btn" onClick={handleApprove} disabled={multisig.isRunning}>
-                  Approve
+
+            {multisig.isStale && (
+              <div className="callout">
+                <span className="status-dot off" />
+                <span>
+                  {multisig.isExpired
+                    ? "This proposal's deadline has passed — executing it now would revert."
+                    : "The Safe's nonce has moved since this proposal was built (another Safe transaction went through) — its signature no longer matches, and executing it now would revert."}{" "}
+                  Discard it and propose again.
+                </span>
+              </div>
+            )}
+
+            <div className="action-row">
+              <div className="action-row-primary">
+                {isOwner && !multisig.approvals.some((o) => o.toLowerCase() === account?.toLowerCase()) && (
+                  <button className="btn" onClick={handleApprove} disabled={multisig.isRunning || multisig.isStale}>
+                    Approve
+                  </button>
+                )}
+                <button
+                  className="btn"
+                  onClick={handleExecuteNow}
+                  disabled={multisig.isRunning || !proposalMet || multisig.isStale}
+                >
+                  Execute now
                 </button>
-              )}
-              <button
-                className="btn"
-                onClick={handleExecuteNow}
-                disabled={multisig.isRunning || !proposalMet}
-              >
-                Execute now
-              </button>
-              <button className="btn btn-secondary" onClick={handleCopyProposal} disabled={multisig.isRunning}>
-                Copy proposal to share
-              </button>
-              <button className="btn btn-secondary" onClick={multisig.reset} disabled={multisig.isRunning}>
-                Discard
-              </button>
+              </div>
+              <div className="action-row-secondary">
+                <button className="btn btn-secondary" onClick={handleCopyProposal} disabled={multisig.isRunning}>
+                  Copy proposal to share
+                </button>
+                <button className="btn btn-secondary" onClick={multisig.reset} disabled={multisig.isRunning}>
+                  Discard
+                </button>
+              </div>
             </div>
           </div>
         )}

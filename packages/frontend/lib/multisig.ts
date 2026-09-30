@@ -178,6 +178,13 @@ export function decodeProposal(blob: string): RebalanceProposal {
   return parsed as RebalanceProposal;
 }
 
+/** The Safe's current nonce — a proposal's own `nonce` field must still match this for its hash
+ * to mean anything; if another Safe transaction has gone through since, the proposal is stale
+ * (its hash no longer corresponds to any executable transaction) and needs rebuilding. */
+export async function getSafeNonce(provider: ethers.Provider): Promise<bigint> {
+  return safeContract(provider).nonce();
+}
+
 export async function getProposalHash(provider: ethers.Provider, proposal: RebalanceProposal): Promise<string> {
   return safeContract(provider).getTransactionHash(
     proposal.to,
