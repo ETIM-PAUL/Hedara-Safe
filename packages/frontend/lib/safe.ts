@@ -38,6 +38,15 @@ export function getModuleAddress(): string {
   return requireEnv("NEXT_PUBLIC_MODULE_ADDRESS", process.env.NEXT_PUBLIC_MODULE_ADDRESS);
 }
 
+/** A read-only provider for public on-chain state (owners, threshold, balances) that shouldn't
+ * wait on a wallet connection — the Safe section reads real data before "Connect wallet" is even
+ * clicked, rather than showing a fallback default that looks like real state but isn't. */
+export function getReadOnlyProvider(): ethers.Provider {
+  return new ethers.JsonRpcProvider(
+    process.env.NEXT_PUBLIC_HEDERA_RPC_URL || "https://testnet.hashio.io/api"
+  );
+}
+
 /** Tokens shown on the treasury dashboard — defaults match the WHBAR/SAUCE pair demo-rebalance.ts uses. */
 export function getTreasuryTokens(): TreasuryToken[] {
   return [

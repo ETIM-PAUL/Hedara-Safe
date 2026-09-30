@@ -8,6 +8,7 @@ import {
   getTreasuryBalances,
   getSafeAddress,
   getTreasuryTokens,
+  getReadOnlyProvider,
   type SafeState,
   type TokenBalance,
   type TreasuryToken
@@ -16,6 +17,7 @@ import { getQuote, applySlippage, DEADLINE_WINDOW_SECONDS, type Quote } from "@/
 import { addOwner } from "@/lib/multisig";
 import { useMultisigRebalance } from "@/lib/useMultisigRebalance";
 import { hashscanTxUrl, type RebalanceStatus, type RebalanceStage } from "@/lib/txStatus";
+import { shortenAddress } from "@/lib/format";
 import {
   getPriceGuardAddress,
   getOracleOptions,
@@ -119,13 +121,17 @@ function PriceGuardSection({
       <p className="section-desc">{description}</p>
       <div className="ledger-row">
         <span className="ledger-key">Address</span>
-        <span className="ledger-value">{address}</span>
+        <span className="ledger-value" title={address}>
+          {shortenAddress(address)}
+        </span>
       </div>
       {state ? (
         <>
           <div className="ledger-row">
             <span className="ledger-key">Active oracle</span>
-            <span className="ledger-value">{oracleName(state.oracleAddress, oracleOptions)}</span>
+            <span className="ledger-value" title={state.oracleAddress}>
+              {oracleName(state.oracleAddress, oracleOptions)}
+            </span>
           </div>
           <div className="ledger-row">
             <span className="ledger-key">Condition</span>
@@ -346,7 +352,7 @@ export default function Home() {
     }
   }
 
-  async function loadSafeData(activeProvider: BrowserProvider) {
+  async function loadSafeData(activeProvider: ethers.Provider) {
     const [state, tokenBalances] = await Promise.all([
       getSafeState(activeProvider),
       getTreasuryBalances(activeProvider)
@@ -354,6 +360,18 @@ export default function Home() {
     setSafeState(state);
     setBalances(tokenBalances);
   }
+
+  // Owners, threshold, and balances are public on-chain state — read them on load via a
+  // read-only RPC provider rather than waiting for "Connect wallet". Without this, the page
+  // briefly showed stale fallback numbers (e.g. "1 of 1" from `safeState?.threshold ?? 1`) that
+  // looked like real state before a wallet connection populated the real values.
+  useEffect(() => {
+    if (!safeAddress) return;
+    loadSafeData(getReadOnlyProvider()).catch(() => {
+      // Public RPC hiccup — the "Connect wallet" flow will retry with the wallet's own provider.
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [safeAddress]);
 
   function resetConnection() {
     setProvider(null);
@@ -440,7 +458,7 @@ export default function Home() {
     const amountIn = ethers.parseUnits(amount, tokenIn.decimals);
     const min = applySlippage(quote.amountOut, slippageBps);
     const deadline = Math.floor(Date.now() / 1000) + DEADLINE_WINDOW_SECONDS;
-    await multisig.propose(signer, tokenIn.address, tokenOut.address, amountIn, min, deadline);
+    await multisig.propose(signer, tokenIn.address, tokenOut.address, amountIn, min, deadline, slippageBps);
   }
 
   async function handleApprove() {
@@ -483,8 +501,8 @@ export default function Home() {
     <main className="page">
       <h1 className="mark">hedera-safe-swap</h1>
       <p className="tagline">
-        A Safe multisig treasury on Hedera. Idle holdings sit here until an owner rebalances them
-        through SaucerSwap — nothing moves without that call.
+        A Safe multisig treasury on Hedera. Funds move only through owner-approved SaucerSwap
+        swaps.
       </p>
 
       <div className="connect-row">
@@ -494,7 +512,9 @@ export default function Home() {
           </button>
         ) : (
           <>
-            <span className="account">{account}</span>
+            <span className="account" title={account}>
+              {shortenAddress(account)}
+            </span>
             <button className="btn btn-secondary" onClick={handleDisconnect}>
               Disconnect
             </button>
@@ -510,14 +530,23 @@ export default function Home() {
         {safeAddress && (
           <div className="ledger-row">
             <span className="ledger-key">Address</span>
-            <span className="ledger-value">{safeAddress}</span>
+            <span className="ledger-value" title={safeAddress}>
+              {shortenAddress(safeAddress)}
+            </span>
           </div>
         )}
         {safeState && (
           <>
             <div className="ledger-row">
               <span className="ledger-key">Owners</span>
-              <span className="ledger-value">{safeState.owners.join(", ")}</span>
+              <span className="ledger-value">
+                {safeState.owners.map((o, i) => (
+                  <span key={o}>
+                    {i > 0 && ", "}
+                    <span title={o}>{shortenAddress(o)}</span>
+                  </span>
+                ))}
+              </span>
             </div>
             <div className="ledger-row">
               <span className="ledger-key">Threshold</span>
@@ -557,8 +586,8 @@ export default function Home() {
             {isOwner && safeState.threshold === 1 && safeState.owners.length < 3 && (
               <p className="hint" style={{ marginTop: "0.5rem" }}>
                 {safeState.owners.length === 1
-                  ? "Adds a 2nd owner, threshold stays 1-of-2 — you can still add the 3rd alone."
-                  : "Adds the 3rd owner and raises the threshold to 2-of-3 in the same call — after this, rebalances need 2 owners' approval."}
+                  ? "Adds owner 2, threshold stays 1-of-2."
+                  : "Adds owner 3 and raises the threshold to 2-of-3."}
               </p>
             )}
             <StatusTracker status={ownerStatus} />
@@ -578,10 +607,8 @@ export default function Home() {
       <section className="ledger-section">
         <p className="section-label">Rebalance</p>
         <p className="section-desc">
-          Requires the Safe&apos;s full signature threshold ({threshold} of {safeState?.owners.length ?? 1}) —
-          `RebalanceModule.rebalance()` only accepts calls from the Safe itself, never a single
-          owner acting alone. Propose below; once enough owners have approved, it executes
-          automatically.
+          Needs {threshold} of {safeState?.owners.length ?? 1} owner signatures — no single owner
+          can move funds alone. Propose, then Approve and Execute separately.
         </p>
         <div className="swap-form">
           <input
@@ -647,7 +674,7 @@ export default function Home() {
             <textarea
               className="swap-input"
               style={{ width: "100%", minHeight: "3rem" }}
-              placeholder="Paste a proposal another owner shared, to review and approve it"
+              placeholder="Paste a shared proposal to review and approve"
               value={multisig.pasteInput}
               onChange={(e) => multisig.setPasteInput(e.target.value)}
             />
@@ -667,6 +694,12 @@ export default function Home() {
                 {formatTokenAmount(multisig.decoded.tokenOut, multisig.decoded.amountOutMin)}
               </span>
             </div>
+            {typeof multisig.proposal.slippageBps === "number" && (
+              <div className="ledger-row">
+                <span className="ledger-key">Slippage used</span>
+                <span className="ledger-value">{(multisig.proposal.slippageBps / 100).toFixed(2)}%</span>
+              </div>
+            )}
             <div className="ledger-row">
               <span className="ledger-key">Deadline</span>
               <span className="ledger-value">
@@ -679,7 +712,18 @@ export default function Home() {
               <span className="ledger-value">
                 <span className={`status-dot ${proposalMet ? "on" : "off"}`} />
                 {multisig.approvals.length} of {threshold}
-                {multisig.approvals.length > 0 ? ` (${multisig.approvals.join(", ")})` : ""}
+                {multisig.approvals.length > 0 && (
+                  <>
+                    {" ("}
+                    {multisig.approvals.map((o, i) => (
+                      <span key={o}>
+                        {i > 0 && ", "}
+                        <span title={o}>{shortenAddress(o)}</span>
+                      </span>
+                    ))}
+                    {")"}
+                  </>
+                )}
               </span>
             </div>
 
@@ -687,10 +731,8 @@ export default function Home() {
               <div className="callout">
                 <span className="status-dot off" />
                 <span>
-                  {multisig.isExpired
-                    ? "This proposal's deadline has passed — executing it now would revert."
-                    : "The Safe's nonce has moved since this proposal was built (another Safe transaction went through) — its signature no longer matches, and executing it now would revert."}{" "}
-                  Discard it and propose again.
+                  {multisig.isExpired ? "Deadline passed." : "Safe's nonce moved — stale."} Discard
+                  and propose again.
                 </span>
               </div>
             )}
@@ -728,7 +770,7 @@ export default function Home() {
       {priceGuardAddress && (
         <PriceGuardSection
           title="Price Guard (HBAR/USD)"
-          description="Permissionless — anyone can call it, but it only executes if HBAR/USD (not SAUCE) meets the condition below. WHBAR tracks HBAR 1:1, so this gates the WHBAR side of the swap."
+          description="Permissionless — executes only if HBAR/USD meets the condition below. WHBAR tracks HBAR 1:1; SAUCE isn't gated."
           address={priceGuardAddress}
           isOwner={isOwner}
           hasAccount={!!account}

@@ -1,6 +1,7 @@
 import { ethers } from "ethers";
 import { type TreasuryToken } from "./safe";
 import { waitForMirrorNode, type RebalanceStatus } from "./txStatus";
+import { shortenAddress } from "./format";
 
 const PRICE_GUARD_ABI = [
   "function trigger(address tokenIn, address tokenOut, uint256 amountIn, uint256 amountOutMin, uint256 deadline, bytes[] calldata updateData) payable returns (uint256)",
@@ -46,7 +47,7 @@ export function getOracleOptions(): OracleOption[] {
 
 export function oracleName(address: string, options: OracleOption[]): string {
   const match = options.find((o) => o.address.toLowerCase() === address.toLowerCase());
-  return match?.name ?? address;
+  return match?.name ?? shortenAddress(address);
 }
 
 export interface PriceGuardState {

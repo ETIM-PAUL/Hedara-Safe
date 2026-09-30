@@ -125,6 +125,12 @@ export interface RebalanceProposal {
   amountIn: string;
   amountOutMin: string;
   deadline: number;
+  /** The slippage tolerance (basis points) the proposer used to derive `amountOutMin` from the
+   * quote at propose time. Not part of the Safe transaction itself — `amountOutMin` is what's
+   * actually enforced on-chain — but an approving owner reviewing this proposal should be able to
+   * see what tolerance produced that number without having to reverse-engineer it from a quote
+   * that may have moved since. */
+  slippageBps: number;
 }
 
 /** The exact Safe transaction a rebalance becomes — every approving owner is agreeing to this
@@ -136,7 +142,8 @@ export async function buildRebalanceProposal(
   tokenOut: string,
   amountIn: bigint,
   amountOutMin: bigint,
-  deadline: number
+  deadline: number,
+  slippageBps: number
 ): Promise<RebalanceProposal> {
   const data = moduleIface.encodeFunctionData("rebalance", [
     tokenIn,
@@ -154,7 +161,8 @@ export async function buildRebalanceProposal(
     tokenOut,
     amountIn: amountIn.toString(),
     amountOutMin: amountOutMin.toString(),
-    deadline
+    deadline,
+    slippageBps
   };
 }
 

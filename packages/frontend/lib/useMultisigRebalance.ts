@@ -109,11 +109,20 @@ export function useMultisigRebalance(params: {
     tokenOut: string,
     amountIn: bigint,
     amountOutMin: bigint,
-    deadline: number
+    deadline: number,
+    slippageBps: number
   ) {
     if (!provider) return;
     setStatus(null);
-    const built = await buildRebalanceProposal(provider, tokenIn, tokenOut, amountIn, amountOutMin, deadline);
+    const built = await buildRebalanceProposal(
+      provider,
+      tokenIn,
+      tokenOut,
+      amountIn,
+      amountOutMin,
+      deadline,
+      slippageBps
+    );
     const txHash = await getProposalHash(provider, built);
     setProposal(built);
     setDecoded(decodeRebalanceCalldata(built.data));
