@@ -42,3 +42,7 @@ export async function waitForMirrorNode(
 export function hashscanTxUrl(txHash: string): string {
   return `https://hashscan.io/testnet/transaction/${txHash}`;
 }
+
+export function hashscanContractUrl(address: string): string {
+  return `https://hashscan.io/testnet/contract/${address}`;
+}

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ethers, type BrowserProvider } from "ethers";
-import { connectWallet, disconnectWallet, onAccountsChanged, NoWalletError } from "@/lib/wallet";
+import { connectWallet, disconnectWallet, onAccountsChanged, tryReconnectWallet, NoWalletError } from "@/lib/wallet";
 import {
   getSafeState,
   getTreasuryBalances,
@@ -16,7 +16,7 @@ import {
 import { getQuote, applySlippage, DEADLINE_WINDOW_SECONDS, type Quote } from "@/lib/rebalance";
 import { addOwner } from "@/lib/multisig";
 import { useMultisigRebalance } from "@/lib/useMultisigRebalance";
-import { hashscanTxUrl, type RebalanceStatus, type RebalanceStage } from "@/lib/txStatus";
+import { hashscanTxUrl, hashscanContractUrl, type RebalanceStatus, type RebalanceStage } from "@/lib/txStatus";
 import { shortenAddress } from "@/lib/format";
 import {
   getPriceGuardAddress,
@@ -121,8 +121,10 @@ function PriceGuardSection({
       <p className="section-desc">{description}</p>
       <div className="ledger-row">
         <span className="ledger-key">Address</span>
-        <span className="ledger-value" title={address}>
-          {shortenAddress(address)}
+        <span className="ledger-value">
+          <a href={hashscanContractUrl(address)} target="_blank" rel="noreferrer">
+            {address}
+          </a>
         </span>
       </div>
       {state ? (
@@ -262,6 +264,19 @@ export default function Home() {
   useEffect(() => {
     providerRef.current = provider;
   }, [provider]);
+
+  // Restore the wallet connection after a page refresh, if the wallet already has this origin
+  // authorized — otherwise every reload drops back to "Connect wallet" even though the wallet
+  // itself never actually disconnected.
+  useEffect(() => {
+    tryReconnectWallet().then((result) => {
+      if (!result) return;
+      setProvider(result.provider);
+      setAccount(result.account);
+      loadSafeData(result.provider);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     const unsubscribe = onAccountsChanged((accounts) => {
@@ -530,8 +545,10 @@ export default function Home() {
         {safeAddress && (
           <div className="ledger-row">
             <span className="ledger-key">Address</span>
-            <span className="ledger-value" title={safeAddress}>
-              {shortenAddress(safeAddress)}
+            <span className="ledger-value">
+              <a href={hashscanContractUrl(safeAddress)} target="_blank" rel="noreferrer">
+                {safeAddress}
+              </a>
             </span>
           </div>
         )}

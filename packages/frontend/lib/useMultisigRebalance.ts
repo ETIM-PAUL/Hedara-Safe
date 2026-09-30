@@ -136,7 +136,10 @@ export function useMultisigRebalance(params: {
   /** Loads a proposal another owner shared out of band (there's no backend to relay it) — decodes
    * it for review before this owner approves anything. */
   async function loadProposal(blob: string) {
-    if (!provider) return;
+    if (!provider) {
+      setToast("Connect a wallet first.");
+      return;
+    }
     try {
       const loaded = decodeProposal(blob);
       const txHash = await getProposalHash(provider, loaded);

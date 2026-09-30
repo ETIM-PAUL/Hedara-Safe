@@ -43,6 +43,21 @@ export async function connectWallet(): Promise<{ provider: BrowserProvider; acco
 }
 
 /**
+ * Restores a connection that already exists from the wallet's own perspective, without prompting
+ * — `eth_accounts` (unlike `eth_requestAccounts`) just returns whatever accounts this origin is
+ * already authorized for, empty if none. Lets the app come back connected after a page refresh
+ * instead of showing "Connect wallet" again every time, without re-asking for permission the
+ * wallet already granted.
+ */
+export async function tryReconnectWallet(): Promise<{ provider: BrowserProvider; account: string } | null> {
+  if (!window.ethereum) return null;
+  const accounts = (await window.ethereum.request({ method: "eth_accounts" })) as string[];
+  if (!accounts || accounts.length === 0) return null;
+  const provider = new BrowserProvider(window.ethereum);
+  return { provider, account: accounts[0] };
+}
+
+/**
  * EIP-1193 has no universal "disconnect" — a wallet's connection is really just its own
  * permission grant, which most wallets don't let a page revoke without a newer, unevenly
  * supported RPC method (EIP-2255). Best effort: try to revoke, but the disconnect that actually
