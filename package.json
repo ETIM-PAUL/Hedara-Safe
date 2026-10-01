@@ -2,7 +2,7 @@
   "name": "hedera-safe-swap",
   "private": true,
   "version": "0.1.0",
-  "description": "Gnosis Safe multisig treasury on Hedera with a SaucerSwap rebalance module",
+  "description": "Gnosis Safe multisig treasury on Hedera: 2-of-3 owner-quorum SaucerSwap rebalancing, a Chainlink/Supra price-guarded module, and proposals relayed via HCS",
   "license": "MIT",
   "workspaces": [
     "packages/contracts",

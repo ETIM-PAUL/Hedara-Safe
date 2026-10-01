@@ -1,6 +1,6 @@
 {
   "name": "hedera-safe-swap",
-  "description": "Gnosis Safe multisig treasury on Hedera: a 2-of-3 owner-quorum module rebalances idle holdings through SaucerSwap, plus a permissionless price-guarded module backed by live Chainlink/Supra oracles.",
+  "description": "Gnosis Safe multisig treasury on Hedera: a 2-of-3 owner-quorum module rebalances idle holdings through SaucerSwap, a permissionless price-guarded module backed by live Chainlink/Supra oracles, and rebalance proposals relayed between owners via HCS.",
   "version": "0.1.0",
   "create-scaffold-hbar": {
     "capabilities": {

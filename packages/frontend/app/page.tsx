@@ -686,12 +686,47 @@ export default function Home() {
           </p>
         )}
 
+        {threshold > 1 && !multisig.proposal && multisig.hasProposalsTopic && (
+          <div className="ledger-card" style={{ marginTop: "1rem" }}>
+            <div className="action-row" style={{ marginTop: 0 }}>
+              <p className="section-label" style={{ margin: 0 }}>
+                Proposals from other owners
+              </p>
+              <button
+                className="btn btn-secondary"
+                onClick={() => multisig.refreshRecentProposals()}
+                disabled={multisig.recentProposalsLoading}
+              >
+                {multisig.recentProposalsLoading ? "Refreshing…" : "Refresh"}
+              </button>
+            </div>
+            {multisig.recentProposals.length === 0 ? (
+              <p className="ledger-key">
+                {multisig.recentProposalsLoading ? "Loading…" : "None published yet."}
+              </p>
+            ) : (
+              multisig.recentProposals.map((p) => (
+                <div className="ledger-row" key={p.sequenceNumber}>
+                  <span className="ledger-key">
+                    #{p.sequenceNumber} — {new Date(Number(p.consensusTimestamp.split(".")[0]) * 1000).toLocaleString()}
+                  </span>
+                  <span className="ledger-value">
+                    <button className="btn btn-secondary" onClick={() => multisig.loadProposal(p.blob)}>
+                      Load
+                    </button>
+                  </span>
+                </div>
+              ))
+            )}
+          </div>
+        )}
+
         {threshold > 1 && !multisig.proposal && (
           <div className="swap-form" style={{ marginTop: "1rem" }}>
             <textarea
               className="swap-input"
               style={{ width: "100%", minHeight: "3rem" }}
-              placeholder="Paste a shared proposal to review and approve"
+              placeholder="Or paste a shared proposal to review and approve"
               value={multisig.pasteInput}
               onChange={(e) => multisig.setPasteInput(e.target.value)}
             />

@@ -13,6 +13,7 @@ import {
   type RebalanceProposal,
   type DecodedRebalance
 } from "./multisig";
+import { getProposalsTopicId, publishProposal, fetchRecentProposals, type TopicProposal } from "./hcs";
 import type { RebalanceStatus } from "./txStatus";
 
 // How often the "is this proposal still valid" check re-runs while one is pending — cheap reads
@@ -46,6 +47,8 @@ export function useMultisigRebalance(params: {
   const [status, setStatus] = useState<RebalanceStatus | null>(null);
   const [currentNonce, setCurrentNonce] = useState<bigint | null>(null);
   const [now, setNow] = useState(() => Date.now());
+  const [recentProposals, setRecentProposals] = useState<TopicProposal[]>([]);
+  const [recentProposalsLoading, setRecentProposalsLoading] = useState(false);
 
   const isRunning = status !== null && status.stage !== "confirmed" && status.stage !== "failed";
 
@@ -95,6 +98,24 @@ export function useMultisigRebalance(params: {
     setCurrentNonce(null);
   }
 
+  async function refreshRecentProposals() {
+    if (!getProposalsTopicId()) return;
+    setRecentProposalsLoading(true);
+    try {
+      setRecentProposals(await fetchRecentProposals());
+    } finally {
+      setRecentProposalsLoading(false);
+    }
+  }
+
+  // Loads the topic's recent messages once there's a reason to look — no active proposal of our
+  // own yet, and an owner might need to pick one up from another owner's session.
+  useEffect(() => {
+    if (proposal) return;
+    refreshRecentProposals();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [proposal]);
+
   async function refreshApprovals(currentHash: string) {
     if (!provider) return [];
     const current = await getApprovals(provider, owners, currentHash);
@@ -131,6 +152,13 @@ export function useMultisigRebalance(params: {
     await approveProposal(signer, txHash, setStatus);
     const current = await refreshApprovals(txHash);
     notifyApprovalOutcome(current);
+
+    // Best-effort — if this fails (relay not configured, transient error), the Copy-to-share
+    // button is still right there as a fallback. Never blocks the approval that already landed.
+    const published = await publishProposal(encodeProposal(built));
+    if (!published && getProposalsTopicId()) {
+      setToast("Approved, but couldn't publish to the proposal topic — use Copy to share it instead.");
+    }
   }
 
   /** Loads a proposal another owner shared out of band (there's no backend to relay it) — decodes
@@ -202,6 +230,10 @@ export function useMultisigRebalance(params: {
     isExpired,
     isStaleNonce,
     isStale,
+    recentProposals,
+    recentProposalsLoading,
+    refreshRecentProposals,
+    hasProposalsTopic: getProposalsTopicId() !== null,
     propose,
     loadProposal,
     approve,

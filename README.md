@@ -46,9 +46,13 @@ adapter has no condition to gate on — it'd just be `RebalanceModule` again, ba
   grows the Safe from 1 to 3 owners, raises the threshold to 2-of-3, and proves a real
   quorum-gated rebalance (including a deliberate premature-execution attempt that must revert) —
   see [Multisig](#multisig-adding-owners-and-quorum-gated-rebalances) below.
+- `packages/contracts/scripts/create-proposals-topic.ts` — creates the HCS topic rebalance
+  proposals get published to — see [Proposal relay via
+  HCS](#proposal-relay-via-hcs) below.
 - `packages/frontend` — Next.js app: wallet connect, a read-only Safe/treasury ledger, an
   owner-management flow, a quorum-gated rebalance flow (`lib/multisig.ts` +
-  `lib/useMultisigRebalance.ts`), and a price-guard section (`lib/usePriceGuard.ts`), all reading
+  `lib/useMultisigRebalance.ts`, with proposals relayed via HCS — `lib/hcs.ts` +
+  `app/api/proposals/route.ts`), and a price-guard section (`lib/usePriceGuard.ts`), all reading
   the real deployed contracts.
 
 ## Prerequisites
@@ -78,6 +82,7 @@ Then fill in `.env`:
 | `OWNER2_ADDRESS` / `OWNER2_KEY` / `OWNER3_ADDRESS` | Only needed for `deploy-multisig-rebalance.ts` — two throwaway testnet EVM accounts (funded with a little HBAR) that become the Safe's 2nd and 3rd owners for the quorum proof |
 | `NEXT_PUBLIC_PRICE_GUARD_MODULE_ADDRESS` | Printed by `deploy-oracle-adapters.ts` — optional, the Price Guard UI section hides itself if unset |
 | `NEXT_PUBLIC_CHAINLINK_ADAPTER_ADDRESS` / `NEXT_PUBLIC_SUPRA_ADAPTER_ADDRESS` | Also printed by `deploy-oracle-adapters.ts` — only the ones set show up as switch options in the UI |
+| `NEXT_PUBLIC_PROPOSALS_TOPIC_ID` | Printed by `create-proposals-topic.ts` — optional, the Rebalance section falls back to manual copy/paste if unset |
 
 ## Deploy contracts to Hedera testnet
 
@@ -114,10 +119,12 @@ to move funds:
   `amountOutMin`. **Propose rebalance** builds the exact Safe transaction and casts your own
   approval. Approving and executing are always two separate, explicit actions — even on a 1-of-N
   Safe where your own approval already meets the threshold, nothing moves until you separately
-  click **Execute now**, so one wallet confirmation never silently becomes two. A **Copy proposal
-  to share** button gives you a blob to send the other owners out of band; they paste it into
-  **Load proposal** to review the decoded swap details before approving from their own wallet.
-  Once enough approvals exist, anyone can hit **Execute now**.
+  click **Execute now**, so one wallet confirmation never silently becomes two. The proposal gets
+  published to an HCS topic automatically, so the other owners see it listed under "Proposals from
+  other owners" and just click **Load** — no copy/paste needed (a **Copy proposal to share** button
+  and a paste box are still there as a fallback if the topic isn't configured or publishing fails).
+  Once enough approvals exist, anyone can hit **Execute now**. See [Proposal relay via
+  HCS](#proposal-relay-via-hcs) for how this works.
 - **Price Guard** — shows `PriceGuardedRebalanceModule`'s configured trigger condition (labeled
   `Condition (HBAR/USD)` — it's explicitly not a SAUCE price condition; WHBAR is Hedera's native
   token 1:1 wrapped, so its dollar value tracks HBAR/USD directly, which is what actually gates
@@ -326,6 +333,46 @@ of 2 required approvals, which reverts, before the real 2-signature execution:
 Reproduce with `packages/contracts/scripts/deploy-multisig-rebalance.ts` — see [Reproducing the
 multisig proof](#reproducing-the-multisig-proof) below.
 
+## Proposal relay via HCS
+
+Sharing a rebalance proposal between owners started as pure copy/paste — the proposer gets a
+base64 blob and has to send it to the other owners some other way (Slack, email, whatever). That
+still works and is documented above as a fallback, but it's clunky, and Hedera has a native
+service built for exactly this: the **Hedera Consensus Service (HCS)**, a public, timestamped,
+append-only topic that anyone can read and (if open) write to.
+
+**Why this needed a server, when nothing else in this app does.** The natural instinct was: have
+`PriceGuardedRebalanceModule`-style logic call HCS straight from Solidity, the same way HTS token
+operations go through the `0x167` precompile. That precompile doesn't exist for HCS yet — we
+checked rather than assumed: [HIP-1208](https://github.com/hiero-ledger/hiero-improvement-proposals/pull/1208)
+proposes exactly this and is still in Draft status, effectively stagnant since December 2025, not
+deployed on testnet or mainnet. So a contract can't submit an HCS message, and neither can a
+browser wallet — MetaMask (and every EIP-1193 wallet) only produces EVM signatures, not native
+Hedera transactions. Reading a topic is a plain public mirror-node fetch, no key needed (see
+`lib/hcs.ts`), but *writing* to one needs a real `TopicMessageSubmitTransaction` signed by a real
+Hedera account key — which is why `app/api/proposals/route.ts` exists: the one server-side piece
+in an otherwise backend-free app, holding the existing testnet operator's key (reused, not a new
+credential) purely to relay proposal text onto the topic.
+
+**This changes nothing about who can actually move funds.** The relay only ever posts data to an
+open topic (`submit_key: null` — see the verified topic below); it never touches the Safe, the
+module, or signs anything on an owner's behalf. Authorization is still 100% on-chain via
+`approveHash()`/`execTransaction()`, exactly as described above — if the relay is down, a proposer
+falls back to the copy/paste button that's always shown right next to it, and nothing about the
+security model changes either way.
+
+**Verified on real testnet:** `packages/contracts/scripts/create-proposals-topic.ts` created the
+topic, and a real proposal was round-tripped through it end to end — published via the API route,
+independently re-fetched from the mirror node (not from the app's own state), and decoded back to
+the exact same bytes:
+
+- Topic: [`0.0.10808809`](https://hashscan.io/testnet/topic/0.0.10808809), memo "hedera-safe-swap: RebalanceModule proposal relay", no submit key (open)
+- A real encoded `RebalanceProposal` (module address, calldata, nonce, slippage) was published and confirmed back from `GET /api/v1/topics/0.0.10808809/messages` — the mirror node's own base64 wrapper, unwrapped once, decoded to the identical JSON that was submitted
+- Mirror node sequence number and consensus timestamp both present and independently queryable, same verification pattern as every transaction in this README
+
+Reproduce with `packages/contracts/scripts/create-proposals-topic.ts` — see [Reproducing the HCS
+topic](#reproducing-the-hcs-topic) below.
+
 ## Off-chain limit orders were considered and ruled out
 
 SaucerSwap V3 has a native order-book/limit-order product that would, in principle, let the Safe
@@ -428,6 +475,20 @@ override (`(await provider.getFeeData()).gasPrice`, doubled for headroom).
 Requires the Safe to already hold some WHBAR (see `demo-rebalance.ts` above to fund it). Copy the
 printed address into `.env` as `NEXT_PUBLIC_MODULE_ADDRESS` — the old one still works for reading
 state but its `rebalance()` is now incompatible with the frontend's quorum flow.
+
+## Reproducing the HCS topic
+
+```bash
+npx hardhat run packages/contracts/scripts/create-proposals-topic.ts --network hedera-testnet
+```
+
+Uses the native Hedera SDK (`@hashgraph/sdk`), not Hardhat/ethers — topic creation has no
+EVM/JSON-RPC equivalent, so this is the one script in the repo that can't go through the
+Solidity/Hardhat side at all. Creates an open topic (no submit key) with
+`HEDERA_OPERATOR_ID`/`HEDERA_OPERATOR_KEY` from `.env` — the same operator used everywhere else in
+this repo, no new credential needed. Copy the printed ID into `.env` as
+`NEXT_PUBLIC_PROPOSALS_TOPIC_ID` to see the "Proposals from other owners" list appear in the
+Rebalance section.
 
 ## License
 

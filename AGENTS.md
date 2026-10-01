@@ -95,6 +95,10 @@ something to refactor.
   2 required approvals, which must revert. Needs `OWNER2_ADDRESS`/`OWNER2_KEY`/`OWNER3_ADDRESS` in
   `.env` (two funded throwaway testnet accounts) — this is the one script in this repo that needs
   more than the single operator key, since proving a quorum requires genuinely different signers.
+- `packages/contracts/scripts/create-proposals-topic.ts` — the one script that uses the native
+  `@hashgraph/sdk` instead of Hardhat/ethers, because creating an HCS topic has no EVM/JSON-RPC
+  equivalent. One-time setup for the proposal relay (see below) — run once, save the printed topic
+  ID into `.env`.
 - `packages/frontend/lib/` — `wallet.ts` (EIP-1193 connect/disconnect + Hedera testnet chain
   add/switch), `safe.ts` (Safe/treasury reads — kept read-only by convention; anything that sends
   a Safe transaction lives in `multisig.ts` instead), `rebalance.ts` (SaucerSwap quote/slippage
@@ -108,7 +112,10 @@ something to refactor.
   building/loading a proposal, tracking approvals, executing. Approving and executing are always
   two separate calls, even when an approval happens to meet the threshold — don't reintroduce
   auto-chaining approve straight into execute; a wallet confirmation for "approve" should never
-  silently become a second confirmation that moves treasury funds),
+  silently become a second confirmation that moves treasury funds), `hcs.ts` (reads: plain mirror
+  node fetches, public, no key. Writes: POSTs to `app/api/proposals/route.ts`, since there's no way
+  to submit an HCS message from a browser wallet — see "Proposal relay via HCS" in the README for
+  why, including why this isn't available as a Solidity precompile today despite HTS having one),
   `priceGuard.ts` (`PriceGuardedRebalanceModule` state + trigger — `triggerPriceGuard()`
   picks `trigger()` vs. `switchOracleAndTrigger()` automatically based on whether the selected
   oracle differs from the active one, and `getOracleOptions()` is driven entirely by which
@@ -125,7 +132,17 @@ something to refactor.
   don't reintroduce it.
 - `packages/frontend/next.config.mjs` — loads the monorepo-root `.env` via `dotenv`, since Next
   only auto-loads `.env` files from its own package directory. Required for `NEXT_PUBLIC_*` vars
-  to reach the client bundle at all.
+  to reach the client bundle at all. The same `dotenv.config()` call is also what makes
+  `HEDERA_OPERATOR_ID`/`HEDERA_OPERATOR_KEY` available to `app/api/proposals/route.ts` — no new
+  env var needed for the HCS relay, it just reads the same operator credentials already used
+  everywhere else in this repo.
+- `packages/frontend/app/api/proposals/route.ts` — the only server-side route in this app, and the
+  only place it holds a private key (the testnet operator's, reused — never a new credential,
+  never `NEXT_PUBLIC_*`). Submits a proposal blob to the HCS topic from `create-proposals-topic.ts`
+  on behalf of whoever proposed it. Must declare `export const runtime = "nodejs"` — `@hashgraph/sdk`
+  doesn't work on Next's Edge runtime, which is otherwise the App Router default for route
+  handlers. This route only ever posts data; it has no way to authorize a Safe transaction, so it
+  being down or misconfigured degrades the UI to the copy/paste fallback, nothing more.
 
 ## Conventions when adding a new module type
 
@@ -171,6 +188,13 @@ something to refactor.
   authorization at all, only a raw ECDSA signature from a real private key. This isn't a "not
   built yet"; it's "cannot be built against this contract as it exists today." Re-verify against
   the live bytecode before revisiting, in case SaucerSwap ships a new reactor version.
+- Don't call HCS (`submitMessage`, `createTopic`, etc.) directly from Solidity, expecting a
+  precompile the way HTS has one at `0x167`. [HIP-1208](https://github.com/hiero-ledger/hiero-improvement-proposals/pull/1208)
+  proposes exactly that and is still in Draft, effectively stagnant since December 2025 — not
+  deployed anywhere. HCS reads are a plain mirror-node fetch (see `lib/hcs.ts`); HCS writes need
+  the native Hedera SDK with a real account key, which is why `app/api/proposals/route.ts` exists
+  as the one server-side piece in this app. Re-check HIP-1208's status before assuming this has
+  changed.
 
 ## Testing
 

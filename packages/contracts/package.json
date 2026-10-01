@@ -13,6 +13,7 @@
     "@openzeppelin/contracts": "^5.0.0"
   },
   "devDependencies": {
+    "@hashgraph/sdk": "^2.81.0",
     "@nomicfoundation/hardhat-toolbox": "^5.0.0",
     "@safe-global/safe-contracts": "^1.4.1",
     "dotenv": "^16.4.0",
