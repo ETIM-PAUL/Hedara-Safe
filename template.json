@@ -1,6 +1,6 @@
 {
   "name": "hedera-safe-swap",
-  "description": "Gnosis Safe multisig treasury on Hedera with an owner-gated module that rebalances idle holdings through SaucerSwap.",
+  "description": "Gnosis Safe multisig treasury on Hedera: a 2-of-3 owner-quorum module rebalances idle holdings through SaucerSwap, plus a permissionless price-guarded module backed by live Chainlink/Supra oracles.",
   "version": "0.1.0",
   "create-scaffold-hbar": {
     "capabilities": {
@@ -18,7 +18,7 @@
     },
     "instructions": [
       "Copy .env.example to .env and fill in your Hedera testnet operator credentials.",
-      "+ Deploy contracts: npx hardhat run packages/contracts/scripts/deploy.ts --network hedera-testnet",
+      "Deploy contracts: npx hardhat run packages/contracts/scripts/deploy.ts --network hedera-testnet",
       "See README.md for the full setup and architecture."
     ]
   }
