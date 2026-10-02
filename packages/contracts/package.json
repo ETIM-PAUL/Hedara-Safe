@@ -19,6 +19,7 @@
     "dotenv": "^16.4.0",
     "hardhat": "^2.22.0",
     "solhint": "^5.0.0",
+    "ts-node": "^10.9.0",
     "typescript": "^5.5.0"
   }
 }
