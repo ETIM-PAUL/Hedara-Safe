@@ -201,3 +201,19 @@ something to refactor.
 Run `npm run test --workspace packages/contracts` before opening a PR against this template.
 Contract changes without a passing test for both success and failure paths should be treated as
 incomplete.
+
+## `packages/contracts/package.json` lists `@nomicfoundation/hardhat-toolbox`'s full peer-dependency tree explicitly — don't trim it
+
+`hardhat-toolbox` doesn't bundle its sub-plugins (`hardhat-ethers`, `hardhat-chai-matchers`,
+`hardhat-verify`, `hardhat-ignition-ethers`, `typechain`, `ts-node`, `ethers`, etc.) — it only
+peer-requires them. A plain `npm install` auto-installs missing peers (npm 7+ default), which is
+why this worked for months of local development without anyone declaring them. It silently breaks
+the moment anyone installs with `--legacy-peer-deps` — which is exactly what
+`create-scaffold-hbar`'s own scaffolding flow does by default. A real fresh scaffold against this
+repo failed at `hardhat compile` with `HH801` (missing `ts-node`, then — after adding that — a
+second `HH801` for the rest of the toolbox's peers, then a third for
+`hardhat-ignition-ethers`'s own transitive peers `hardhat-ignition`/`ignition-core`). Caught and
+fixed by actually scaffolding fresh copies of this exact repo via `npm create scaffold-hbar --
+--template <owner>/<repo> --yes` and running `npm run build` on them — not by reasoning about it.
+If you add a new Hardhat plugin, check its `peerDependencies` and declare every one of them here
+explicitly, then verify with a genuinely fresh scaffold + install before assuming it's fine.
