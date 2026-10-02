@@ -16,10 +16,36 @@
     "requirements": {
       "node": ">=20.18.3"
     },
-    "instructions": [
-      "Copy .env.example to .env and fill in your Hedera testnet operator credentials.",
-      "Deploy contracts: npx hardhat run packages/contracts/scripts/deploy.ts --network hedera-testnet",
-      "See README.md for the full setup and architecture."
-    ]
+    "outro": {
+      "sections": [
+        {
+          "title": "Setup",
+          "steps": [
+            { "text": "Copy .env.example to .env and fill in your Hedera testnet operator credentials." },
+            { "command": "npm install" }
+          ]
+        },
+        {
+          "title": "Deploy to Hedera testnet",
+          "steps": [
+            {
+              "command": "npx hardhat run packages/contracts/scripts/deploy.ts --network hedera-testnet"
+            }
+          ]
+        },
+        {
+          "title": "Run the frontend",
+          "steps": [{ "command": "npm run dev" }]
+        },
+        {
+          "title": "More",
+          "steps": [
+            {
+              "text": "Full setup, architecture, and verified testnet transactions are documented in README.md."
+            }
+          ]
+        }
+      ]
+    }
   }
 }
