@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { BrowserProvider } from "ethers";
+import type { BrowserProvider, Signer } from "ethers";
 import {
   buildRebalanceProposal,
   decodeProposal,
@@ -125,7 +125,7 @@ export function useMultisigRebalance(params: {
 
   /** Builds a brand-new proposal from the swap form and casts the proposer's own approval. */
   async function propose(
-    signer: import("ethers").Signer,
+    signer: Signer,
     tokenIn: string,
     tokenOut: string,
     amountIn: bigint,
@@ -181,7 +181,7 @@ export function useMultisigRebalance(params: {
     }
   }
 
-  async function approve(signer: import("ethers").Signer) {
+  async function approve(signer: Signer) {
     if (!provider || !proposal || !hash) return;
     if (isStale) {
       setToast("This proposal is stale — discard it and propose again.");
@@ -198,11 +198,11 @@ export function useMultisigRebalance(params: {
         `Approved — waiting for ${threshold - currentApprovals.length} more owner approval(s) before this can execute.`
       );
     } else {
-      setToast("Approved — threshold met. Click \"Execute now\" to send the swap.");
+      setToast('Approved — threshold met. Click "Execute now" to send the swap.');
     }
   }
 
-  async function executeNow(signer: import("ethers").Signer) {
+  async function executeNow(signer: Signer) {
     if (!provider || !proposal || !hash) return;
     if (isStale) {
       setToast("This proposal is stale — discard it and propose again.");
