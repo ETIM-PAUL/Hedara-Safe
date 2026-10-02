@@ -120,11 +120,6 @@ export interface RebalanceProposal {
   to: string;
   data: string;
   nonce: string;
-  tokenIn: string;
-  tokenOut: string;
-  amountIn: string;
-  amountOutMin: string;
-  deadline: number;
   /** The slippage tolerance (basis points) the proposer used to derive `amountOutMin` from the
    * quote at propose time. Not part of the Safe transaction itself — `amountOutMin` is what's
    * actually enforced on-chain — but an approving owner reviewing this proposal should be able to
@@ -157,16 +152,11 @@ export async function buildRebalanceProposal(
     to: getModuleAddress(),
     data,
     nonce: nonce.toString(),
-    tokenIn,
-    tokenOut,
-    amountIn: amountIn.toString(),
-    amountOutMin: amountOutMin.toString(),
-    deadline,
     slippageBps
   };
 }
 
-/** Proposals are shared between owners by copy/paste (no backend to relay them) — a compact
+/** Proposals are shared between owners by copy/paste or the HCS relay (see hcs.ts) — a compact
  * blob of exactly the fields that determine the Safe transaction hash, nothing recomputed from
  * a live quote, so every owner is reviewing and approving the identical transaction. */
 export function encodeProposal(proposal: RebalanceProposal): string {
