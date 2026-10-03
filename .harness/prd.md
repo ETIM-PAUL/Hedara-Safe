@@ -14,6 +14,8 @@ build, lint, tests, and the frontend's boot behavior all still hold after any fu
   (`msg.sender == address(safe)`), so it only runs via a quorum-approved Safe `execTransaction`.
   Current deployment: `0x13642c65E863CdEc489999cf92Ef45c82d9c4Ac4` on Safe
   `0x487f330a30E6c7101f86e598BE27a5d46C8B3589` (2-of-3).
+- `packages/contracts/contracts/MajorityThresholdGuard.sol` — Safe transaction guard keeping the
+  threshold at a strict majority of owners on-chain.
 - `packages/contracts/contracts/PriceGuardedRebalanceModule.sol` — permissionless `trigger()`,
   executes only when HBAR/USD meets an owner-set condition. Oracle switchable at runtime between
   `ChainlinkPriceAdapter` and `SupraPriceAdapter` (`contracts/oracle/`).
@@ -52,6 +54,6 @@ a change done.
 
 1. `npm install` and `npm run build` succeed from a clean state.
 2. `npm run lint` passes with zero errors.
-3. `npm run test --workspace packages/contracts` passes (all 27 existing cases, plus any new ones).
+3. `npm run test --workspace packages/contracts` passes (all 35 existing cases, plus any new ones).
 4. The frontend boots and the home route renders real content — no unset-env-var error text
    visible (see `.harness/validators/playwright-smoke.yaml`).

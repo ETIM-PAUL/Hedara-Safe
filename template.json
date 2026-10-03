@@ -29,7 +29,7 @@
           "title": "Deploy to Hedera testnet",
           "steps": [
             {
-              "command": "npx hardhat run packages/contracts/scripts/deploy.ts --network hedera-testnet"
+              "command": "npm run deploy:testnet --workspace packages/contracts"
             }
           ]
         },

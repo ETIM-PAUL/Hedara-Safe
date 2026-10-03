@@ -26,6 +26,8 @@
       "packages/contracts/scripts/deploy-oracle-adapters.ts",
       "packages/contracts/scripts/deploy-multisig-rebalance.ts",
       "packages/contracts/scripts/create-proposals-topic.ts",
+      "packages/contracts/scripts/deploy-majority-guard.ts",
+      "packages/contracts/contracts/MajorityThresholdGuard.sol",
       "packages/frontend/lib/safe.ts",
       "packages/frontend/lib/rebalance.ts",
       "packages/frontend/lib/multisig.ts",
@@ -47,7 +49,10 @@
   "textAssertions": [
     {
       "file": "README.md",
-      "contains": ["npm install", "hashscan.io/testnet/transaction"]
+      "contains": [
+        "npm install",
+        "hashscan.io/testnet/transaction"
+      ]
     }
   ]
 }

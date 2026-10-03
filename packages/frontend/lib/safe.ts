@@ -8,8 +8,13 @@ import { ethers } from "ethers";
 const SAFE_ABI = [
   "function getOwners() view returns (address[])",
   "function getThreshold() view returns (uint256)",
-  "function isModuleEnabled(address module) view returns (bool)"
+  "function isModuleEnabled(address module) view returns (bool)",
+  "function getStorageAt(uint256 offset, uint256 length) view returns (bytes)"
 ];
+
+// keccak256("guard_manager.guard.address") — where Safe 1.4.1 stores its transaction guard. Safe
+// has no getter for it, but StorageAccessible's getStorageAt() reads any slot.
+const GUARD_STORAGE_SLOT = "0x4a204f620c8c5ccdca3fd54d003badd85ba500436a431f0cbda4f558c93c34c8";
 
 const ERC20_ABI = ["function balanceOf(address) view returns (uint256)"];
 
@@ -69,16 +74,25 @@ export interface SafeState {
   owners: string[];
   threshold: number;
   moduleEnabled: boolean;
+  /** The Safe's transaction guard, or null if none is set. */
+  guard: string | null;
 }
 
 export async function getSafeState(provider: ethers.Provider): Promise<SafeState> {
   const safe = new ethers.Contract(getSafeAddress(), SAFE_ABI, provider);
-  const [owners, threshold, moduleEnabled] = await Promise.all([
+  const [owners, threshold, moduleEnabled, guardWord] = await Promise.all([
     safe.getOwners(),
     safe.getThreshold(),
-    safe.isModuleEnabled(getModuleAddress())
+    safe.isModuleEnabled(getModuleAddress()),
+    safe.getStorageAt(GUARD_STORAGE_SLOT, 1)
   ]);
-  return { owners, threshold: Number(threshold), moduleEnabled };
+  const guard = ethers.getAddress(ethers.dataSlice(guardWord, 12));
+  return {
+    owners,
+    threshold: Number(threshold),
+    moduleEnabled,
+    guard: guard === ethers.ZeroAddress ? null : guard
+  };
 }
 
 export interface TokenBalance extends TreasuryToken {

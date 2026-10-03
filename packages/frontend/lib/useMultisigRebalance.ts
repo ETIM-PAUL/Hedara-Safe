@@ -160,7 +160,9 @@ export function useMultisigRebalance(params: {
     setDecoded(decodeProposalAction(built));
     setHash(txHash);
 
-    await approveProposal(signer, txHash, setStatus);
+    // A proposal its own proposer couldn't approve isn't worth relaying; the step tracker already
+    // shows why it failed.
+    if (!(await approveProposal(signer, txHash, setStatus))) return;
     const current = await refreshApprovals(txHash);
     notifyApprovalOutcome(current);
 
@@ -202,7 +204,7 @@ export function useMultisigRebalance(params: {
       setToast("This proposal is stale — discard it and propose again.");
       return;
     }
-    await approveProposal(signer, hash, setStatus);
+    if (!(await approveProposal(signer, hash, setStatus))) return;
     const current = await refreshApprovals(hash);
     notifyApprovalOutcome(current);
   }

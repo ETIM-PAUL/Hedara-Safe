@@ -215,9 +215,9 @@ export async function approveProposal(
   signer: ethers.Signer,
   hash: string,
   onStatus: (status: RebalanceStatus) => void
-): Promise<void> {
+): Promise<boolean> {
   const safe = safeContract(signer);
-  await runSafeTx(async () => {
+  return runSafeTx(async () => {
     await assertCanPayGas(signer);
     return safe.approveHash(hash);
   }, onStatus);
@@ -263,6 +263,25 @@ export type DecodedAction =
     }
   | { kind: "addOwner"; owner: string; threshold: number }
   | { kind: "removeOwner"; prevOwner: string; owner: string; threshold: number };
+
+/** The app's quorum policy: a strict majority of owners must sign (2 of 3, 3 of 4, 3 of 5, 4 of 6).
+ * The Safe contract itself accepts any threshold from 1 to the owner count — this is enforced by
+ * the app, not on-chain, so the Safe core stays unmodified. */
+export function minimumThreshold(ownerCount: number): number {
+  return Math.floor(ownerCount / 2) + 1;
+}
+
+/** Why an owner-change proposal breaks the majority policy, or null if it doesn't. Applied to
+ * loaded proposals too, since a blob from HCS or a paste never went through this app's form.
+ * `currentOwnerCount` is the Safe's owner count before the change. */
+export function thresholdPolicyError(action: DecodedAction, currentOwnerCount: number): string | null {
+  if (action.kind === "rebalance") return null;
+  const resultingOwners = action.kind === "addOwner" ? currentOwnerCount + 1 : currentOwnerCount - 1;
+  const min = minimumThreshold(resultingOwners);
+  return action.threshold < min
+    ? `This sets the threshold to ${action.threshold} of ${resultingOwners}, below a majority — it needs at least ${min}.`
+    : null;
+}
 
 /** Decodes a proposal's raw calldata back into readable fields, dispatching on `proposal.kind` to
  * the right ABI — what an approving owner should actually inspect before approving, since the

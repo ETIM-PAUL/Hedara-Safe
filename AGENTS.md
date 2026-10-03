@@ -45,6 +45,16 @@ something to refactor.
   deep" otherwise. That override is scoped to this one file specifically because the vendored
   Safe contracts' inline assembly isn't marked memory-safe and fails to compile under `viaIR`
   globally — don't turn `viaIR` on project-wide.
+- `packages/contracts/contracts/MajorityThresholdGuard.sol` — Safe transaction guard (installed via
+  `setGuard`, Safe's own extension point — the vendored core is untouched) that reverts any
+  `execTransaction` leaving `threshold < owners / 2 + 1`. It checks the Safe's state *after*
+  execution instead of decoding calldata, so new ways of changing owners (batches, `swapOwner`)
+  are covered without a selector list. Two limits to respect: Safe 1.4.1 doesn't guard
+  `execTransactionFromModule`, so never give a module the ability to change owners or threshold;
+  and a guard that always reverts would brick the Safe (the removal transaction is checked too) —
+  any change here needs `test/MajorityThresholdGuard.test.ts` to keep passing, especially the
+  removal and below-majority-lockdown cases. Installed by `scripts/deploy-majority-guard.ts`, which
+  restores a majority *before* setting the guard.
 - `packages/contracts/contracts/oracle/` — `IPriceOracleAdapter.sol` (the interface every adapter
   implements: `getPrice()`, `refreshFee()`, `refresh()`) and the two real adapters (Chainlink,
   Supra — Pyth was removed, see below). Adding a new oracle means writing one more adapter here,
@@ -117,7 +127,11 @@ something to refactor.
   see the README's "Multisig" section for why this exists and how proposals travel between owners
   without a backend. There is no standalone single-owner `addOwner()` anymore; growing or
   shrinking the owner set always goes through this same propose/approve/execute path, even at
-  threshold 1. Don't add a fourth proposal kind here without also deciding deliberately whether it
+  threshold 1. `minimumThreshold()`/`thresholdPolicyError()` hold the app's quorum policy — every
+  owner change must leave a strict majority (`floor(owners / 2) + 1`). On-chain,
+  `MajorityThresholdGuard.sol` enforces the same rule; the app-side check is there for a clear
+  message before anyone signs. Keep the two formulas identical. Check loaded proposals against it,
+  not just the propose form, since a blob from HCS or a paste never went through the form. Don't add a fourth proposal kind here without also deciding deliberately whether it
   needs `onlySafe`-style quorum gating at all — see "Conventions" below),
   `useMultisigRebalance.ts` (the hook each proposal-kind section's UI state machine is built
   from — building/loading a proposal, tracking approvals, executing. Takes a `relevantKinds:

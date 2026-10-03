@@ -14,7 +14,13 @@ import {
   type TreasuryToken
 } from "@/lib/safe";
 import { getQuote, applySlippage, DEADLINE_WINDOW_SECONDS, type Quote } from "@/lib/rebalance";
-import { buildRebalanceProposal, buildAddOwnerProposal, buildRemoveOwnerProposal } from "@/lib/multisig";
+import {
+  buildRebalanceProposal,
+  buildAddOwnerProposal,
+  buildRemoveOwnerProposal,
+  minimumThreshold,
+  thresholdPolicyError
+} from "@/lib/multisig";
 import { useMultisigRebalance } from "@/lib/useMultisigRebalance";
 import { hashscanTxUrl, hashscanContractUrl, type RebalanceStatus, type RebalanceStage } from "@/lib/txStatus";
 import { shortenAddress } from "@/lib/format";
@@ -155,7 +161,8 @@ function ProposalCard({
   onApprove,
   onExecute,
   onCopy,
-  summary
+  summary,
+  blockReason
 }: {
   guard: ReturnType<typeof useMultisigRebalance>;
   threshold: number;
@@ -165,12 +172,15 @@ function ProposalCard({
   onExecute: () => void;
   onCopy: () => void;
   summary: React.ReactNode;
+  /** Set when this app's policy refuses the proposal — shown, and Approve/Execute disabled. */
+  blockReason?: string | null;
 }) {
   if (!guard.proposal || !guard.decoded) return null;
   const proposalMet = guard.approvals.length >= threshold;
+  const blocked = guard.isStale || !!blockReason;
 
   return (
-    <div className={`ledger-card${guard.isStale ? " stale" : ""}`}>
+    <div className={`ledger-card${blocked ? " stale" : ""}`}>
       <p className="section-label">Pending proposal</p>
       {summary}
       <div className="ledger-row">
@@ -203,14 +213,21 @@ function ProposalCard({
         </div>
       )}
 
+      {blockReason && (
+        <div className="callout">
+          <span className="status-dot off" />
+          <span>{blockReason} Discard it and propose a majority threshold instead.</span>
+        </div>
+      )}
+
       <div className="action-row">
         <div className="action-row-primary">
           {isOwner && !guard.approvals.some((o) => o.toLowerCase() === account?.toLowerCase()) && (
-            <button className="btn" onClick={onApprove} disabled={guard.isRunning || guard.isStale}>
+            <button className="btn" onClick={onApprove} disabled={guard.isRunning || blocked}>
               Approve
             </button>
           )}
-          <button className="btn" onClick={onExecute} disabled={guard.isRunning || !proposalMet || guard.isStale}>
+          <button className="btn" onClick={onExecute} disabled={guard.isRunning || !proposalMet || blocked}>
             Execute now
           </button>
         </div>
@@ -586,9 +603,11 @@ export default function Home() {
       showToast("That address is already an owner.");
       return;
     }
-    const nextThreshold = Number(newOwnerThreshold ?? safeState.threshold);
-    if (!Number.isInteger(nextThreshold) || nextThreshold < 1 || nextThreshold > safeState.owners.length + 1) {
-      showToast(`Threshold must be between 1 and ${safeState.owners.length + 1}.`);
+    const ownersAfter = safeState.owners.length + 1;
+    const min = minimumThreshold(ownersAfter);
+    const nextThreshold = Number(newOwnerThreshold ?? defaultAddOwnerThreshold);
+    if (!Number.isInteger(nextThreshold) || nextThreshold < min || nextThreshold > ownersAfter) {
+      showToast(`With ${ownersAfter} owners the threshold must be between ${min} (a majority) and ${ownersAfter}.`);
       return;
     }
     const signer = await provider.getSigner();
@@ -598,15 +617,13 @@ export default function Home() {
     setNewOwnerThreshold(null);
   }
 
-  /** Proposes removing `ownerToRemove`, auto-shrinking the threshold to fit the remaining owner
-   * count rather than exposing another input — removal's threshold constraint is mechanical
-   * (Safe requires `1 <= threshold <= remainingOwners`), unlike add-owner's, which is a real
-   * choice the proposer should see and can change. */
+  /** Proposes removing `ownerToRemove` with the threshold computed rather than asked for: the
+   * current threshold, capped at the remaining owner count and raised to a majority if needed. */
   async function handleProposeRemoveOwner(ownerToRemove: string) {
     if (!provider || !safeState) return;
     const remaining = safeState.owners.length - 1;
-    const nextThreshold = Math.min(safeState.threshold, remaining);
-    if (nextThreshold < 1) {
+    const nextThreshold = Math.max(minimumThreshold(remaining), Math.min(safeState.threshold, remaining));
+    if (remaining < 1) {
       showToast("Can't remove the Safe's last owner.");
       return;
     }
@@ -709,6 +726,14 @@ export default function Home() {
 
   const isOwner = !!account && !!safeState?.owners.some((o) => o.toLowerCase() === account.toLowerCase());
   const threshold = safeState?.threshold ?? 1;
+  const defaultAddOwnerThreshold = safeState
+    ? Math.max(safeState.threshold, minimumThreshold(safeState.owners.length + 1))
+    : 1;
+  const belowMajority = !!safeState && safeState.threshold < minimumThreshold(safeState.owners.length);
+  const ownersPolicyError =
+    ownersProposal.decoded && safeState
+      ? thresholdPolicyError(ownersProposal.decoded, safeState.owners.length)
+      : null;
 
   return (
     <main className="page">
@@ -800,6 +825,19 @@ export default function Home() {
                 {safeState.moduleEnabled ? "enabled" : "not enabled"}
               </span>
             </div>
+            <div className="ledger-row">
+              <span className="ledger-key">Majority guard</span>
+              <span className="ledger-value">
+                <span className={`status-dot ${safeState.guard ? "on" : "off"}`} />
+                {safeState.guard ? (
+                  <a href={hashscanContractUrl(safeState.guard)} target="_blank" rel="noreferrer">
+                    {shortenAddress(safeState.guard)}
+                  </a>
+                ) : (
+                  "not set"
+                )}
+              </span>
+            </div>
           </>
         )}
       </section>
@@ -850,9 +888,9 @@ export default function Home() {
                   <input
                     className="slippage-input"
                     type="number"
-                    min="1"
+                    min={minimumThreshold(safeState.owners.length + 1)}
                     max={safeState.owners.length + 1}
-                    value={newOwnerThreshold ?? String(safeState.threshold)}
+                    value={newOwnerThreshold ?? String(defaultAddOwnerThreshold)}
                     onChange={(e) => setNewOwnerThreshold(e.target.value)}
                     disabled={ownersProposal.isRunning}
                   />
@@ -860,6 +898,17 @@ export default function Home() {
                 <button className="btn" onClick={handleProposeAddOwner} disabled={ownersProposal.isRunning}>
                   {ownersProposal.isRunning ? "Working…" : "Propose add owner"}
                 </button>
+              </div>
+            )}
+
+            {belowMajority && (
+              <div className="callout">
+                <span className="status-dot off" />
+                <span>
+                  This Safe is {safeState.threshold} of {safeState.owners.length}, below a majority.
+                  Any owner change proposed here restores at least a majority (
+                  {minimumThreshold(safeState.owners.length)} of {safeState.owners.length} today).
+                </span>
               </div>
             )}
           </>
@@ -876,6 +925,7 @@ export default function Home() {
           onApprove={handleOwnersApprove}
           onExecute={handleOwnersExecute}
           onCopy={handleOwnersCopy}
+          blockReason={ownersPolicyError}
           summary={
             ownersProposal.decoded && ownersProposal.decoded.kind !== "rebalance" && (
               <div className="ledger-row">

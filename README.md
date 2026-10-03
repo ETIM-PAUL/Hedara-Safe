@@ -24,7 +24,8 @@ _Live testnet state, viewed as one of the Safe's three owners. Each tab is descr
 [Reproducing the transaction](#reproducing-the-transaction) ·
 [Reproducing the oracle switch](#reproducing-the-oracle-switch) ·
 [Reproducing the multisig proof](#reproducing-the-multisig-proof) ·
-[Reproducing the HCS topic](#reproducing-the-hcs-topic)
+[Reproducing the HCS topic](#reproducing-the-hcs-topic) ·
+[Reproducing the majority guard](#reproducing-the-majority-guard)
 
 Two Safe modules do the actual work:
 
@@ -49,10 +50,14 @@ adapter has no condition to gate on — it'd just be `RebalanceModule` again, ba
 
 ## What's here
 
-- `packages/contracts/contracts/RebalanceModule.sol` — owner-triggered swap through SaucerSwap.
+- `packages/contracts/contracts/RebalanceModule.sol` — swap through SaucerSwap, callable only by the
+  Safe itself, so it always needs the Safe's full owner quorum.
 - `packages/contracts/contracts/PriceGuardedRebalanceModule.sol` — permissionless swap, gated on
   whichever `IPriceOracleAdapter` is currently set. Both are meant to be extended (see
   [AGENTS.md](AGENTS.md)).
+- `packages/contracts/contracts/MajorityThresholdGuard.sol` — a Safe transaction guard that reverts any
+  `execTransaction` leaving the threshold below a strict majority of owners — so 1 of 4 is
+  impossible on-chain, not just refused by the app.
 - `packages/contracts/contracts/oracle/` — `IPriceOracleAdapter.sol` (the common interface) plus
   `ChainlinkPriceAdapter.sol` and `SupraPriceAdapter.sol` — thin wrappers translating each
   oracle's real wire format into the same `(price, expo, publishTime)` shape.
@@ -128,7 +133,7 @@ npm run build  # compiles contracts, then builds the frontend
 
 ```bash
 npm run build --workspace packages/contracts
-npx hardhat run packages/contracts/scripts/deploy.ts --network hedera-testnet
+npm run deploy:testnet --workspace packages/contracts
 ```
 
 This deploys the Safe singleton, `SafeProxyFactory`, one Safe proxy, and `RebalanceModule`, then
@@ -146,6 +151,7 @@ deploy script and its own "Reproducing..." section later in this doc — run whi
 - Price Guard (Chainlink/Supra) → `deploy-oracle-adapters.ts`, see [Reproducing the oracle switch](#reproducing-the-oracle-switch)
 - 2-of-3 owner quorum → `deploy-multisig-rebalance.ts`, see [Reproducing the multisig proof](#reproducing-the-multisig-proof)
 - HCS proposal relay → `create-proposals-topic.ts`, see [Reproducing the HCS topic](#reproducing-the-hcs-topic)
+- On-chain majority rule → `deploy-majority-guard.ts`, see [Reproducing the majority guard](#reproducing-the-majority-guard)
 
 ## Run the frontend
 
@@ -172,16 +178,21 @@ row:
   relay via HCS](#proposal-relay-via-hcs) for how this works.
 - **MultiSig** — owner management: every current owner listed with a **Remove** button (shown
   only to owners, and only while the Safe has more than one owner), and an **Add owner** form (an
-  address field plus an editable **New threshold**, which tracks the Safe's current threshold until you change it, so
-  adding an owner never lowers the quorum by accident). Both go
+  address field plus an editable **New threshold**). Both go
   through the exact same propose/approve/execute quorum flow as a rebalance above — adding or
   removing an owner is a real Safe `execTransaction` (`addOwnerWithThreshold`/`removeOwner`, both
   `SelfAuthorized`), not a single click that bypasses the threshold — including its own "Proposals
   from other owners" list and paste fallback over the same HCS topic, filtered to only
-  owner-management proposals so it never mixes with a pending rebalance. Removing an owner
-  auto-computes the new threshold (`min(currentThreshold, remainingOwners)`) rather than exposing
-  another input, since that constraint is mechanical; adding one leaves the threshold as a real
-  choice the proposer sets explicitly. A newly added owner needs some testnet HBAR before it can
+  owner-management proposals so it never mixes with a pending rebalance. Every owner change must
+  leave a **strict majority** in charge — threshold at least `floor(owners / 2) + 1`, so 2 of 3,
+  3 of 4, 3 of 5, 4 of 6. Adding an owner, the threshold field starts at the current threshold
+  (raised to that majority if needed) and won't accept less; removing one, the threshold is
+  computed for you: the current one, capped at the remaining owner count and raised to a
+  majority. A proposal loaded from HCS or pasted in that breaks the rule shows why, with Approve
+  and Execute disabled — a hand-built blob can't sneak past the form. On-chain,
+  `MajorityThresholdGuard` enforces the same rule for anyone calling the Safe directly, app or
+  not; the Safe info row shows whether it's installed. If the Safe is already below a majority,
+  the tab says so and the next owner change restores one. A newly added owner needs some testnet HBAR before it can
   approve or execute anything — on Hedera an EVM address only becomes an account when it first
   receives HBAR — and the app says so instead of failing with a raw gas-estimation error. See
   [Multisig](#multisig-adding-owners-and-quorum-gated-rebalances) below for why owner changes need
@@ -357,10 +368,10 @@ satisfy); once the Safe is above 1-of-N, a genuinely different owner has to appr
 Safe's internal linked list (`getOwners()` returns owners in that same order, so `owners[i - 1]`,
 or the sentinel `0x1` for index 0, is always correct) — which the frontend computes for you rather
 than asking the proposer to know the Safe's internal ordering. Going from the demo's 1-of-1 Safe
-to a real 3-owner, 2-of-3 quorum this way is two add-owner proposals: the first adds owner 2 and
-can set the threshold to 1 or 2; the second adds owner 3 and sets the final threshold — the new
-threshold only takes effect once that proposal has already executed, so it's always safe to choose
-up front.
+to a real 3-owner, 2-of-3 quorum this way is two add-owner proposals: the first adds owner 2 at
+2 of 2 (the majority of two owners), the second adds owner 3 and keeps 2 — giving 2 of 3. A new
+threshold only takes effect once its proposal has executed, so the proposal that sets it is still
+approved under the old one.
 
 **Why `rebalance()` needed to change, not just the owner count.** Before this, `rebalance()` was
 `onlySafeOwner` — it checked `safe.isOwner(msg.sender)` directly, meaning *any single owner* could
@@ -405,6 +416,16 @@ of 2 required approvals, which reverts, before the real 2-signature execution:
 
 Reproduce with `packages/contracts/scripts/deploy-multisig-rebalance.ts` — see [Reproducing the
 multisig proof](#reproducing-the-multisig-proof) below.
+
+**Majority guard, installed on the same Safe:** the Safe had drifted to 1 of 3 through
+owner-change proposals made before the majority rule existed. `deploy-majority-guard.ts` restored
+2 of 3, then installed the guard, so a below-majority threshold is now impossible on-chain:
+
+- `MajorityThresholdGuard`: [`0xeC1685873e305239040d22B9702D907d72A00f8A`](https://hashscan.io/testnet/contract/0xeC1685873e305239040d22B9702D907d72A00f8A)
+- `changeThreshold(2)` tx: [`0xfe617a3f...1b1878`](https://hashscan.io/testnet/transaction/0xfe617a3f9fea76bec5b617e1b3917563ca3e3d5fcfacc3a3c8a62588fb1b1878) — `ChangedThreshold` emitted
+- `setGuard` tx (2 of 3 approvals): [`0x4b1882c8...5dcbef`](https://hashscan.io/testnet/transaction/0x4b1882c89d928db15643bd52626dabff5e14fec55e76b12bada083981c5dcbef) — `ChangedGuard` emitted
+- Both `status: 0x1` (SUCCESS), independently confirmed via mirror node; the guard address was read
+  back from the Safe's guard storage slot afterwards
 
 ## Proposal relay via HCS
 
@@ -465,9 +486,10 @@ real answer instead.
 ## Reproducing the transaction
 
 ```bash
+cd packages/contracts
 SAFE_ADDRESS=<from NEXT_PUBLIC_SAFE_ADDRESS> \
 MODULE_ADDRESS=<RebalanceModule address, printed by deploy.ts> \
-npx hardhat run packages/contracts/scripts/demo-rebalance.ts --network hedera-testnet
+npx hardhat run scripts/demo-rebalance.ts --network hedera-testnet
 ```
 
 This script is what produced the transaction above. It, in order:
@@ -487,9 +509,10 @@ directly if you want to reproduce this against a different SaucerSwap pool.
 ## Reproducing the oracle switch
 
 ```bash
+cd packages/contracts
 SAFE_ADDRESS=<from NEXT_PUBLIC_SAFE_ADDRESS> \
 SAUCERSWAP_ROUTER_ADDRESS=<from .env> \
-npx hardhat run packages/contracts/scripts/deploy-oracle-adapters.ts --network hedera-testnet
+npx hardhat run scripts/deploy-oracle-adapters.ts --network hedera-testnet
 ```
 
 This is what produced the Chainlink/Supra proof above. It, in order:
@@ -510,11 +533,12 @@ module and its switch options in the frontend.
 ## Reproducing the multisig proof
 
 ```bash
+cd packages/contracts
 SAFE_ADDRESS=<from NEXT_PUBLIC_SAFE_ADDRESS> \
 SAUCERSWAP_ROUTER_ADDRESS=<from .env> \
 OWNER2_ADDRESS=<a 2nd testnet EVM address> OWNER2_KEY=<its private key> \
 OWNER3_ADDRESS=<a 3rd testnet EVM address> \
-npx hardhat run packages/contracts/scripts/deploy-multisig-rebalance.ts --network hedera-testnet
+npx hardhat run scripts/deploy-multisig-rebalance.ts --network hedera-testnet
 ```
 
 `OWNER2` and `OWNER3` need a small amount of testnet HBAR each (Hedera auto-creates the account on
@@ -552,7 +576,8 @@ state but its `rebalance()` is now incompatible with the frontend's quorum flow.
 ## Reproducing the HCS topic
 
 ```bash
-npx hardhat run packages/contracts/scripts/create-proposals-topic.ts --network hedera-testnet
+cd packages/contracts
+npx hardhat run scripts/create-proposals-topic.ts --network hedera-testnet
 ```
 
 Uses the native Hedera SDK (`@hashgraph/sdk`), not Hardhat/ethers — topic creation has no
@@ -563,6 +588,36 @@ this repo, no new credential needed. Copy the printed ID into `.env` as
 `NEXT_PUBLIC_PROPOSALS_TOPIC_ID` to see the "Proposals from other owners" list appear in both the
 SafeSwap tab (rebalance proposals) and the MultiSig tab (owner add/remove proposals) — one shared
 topic, each tab filtering to the proposal kinds it cares about.
+
+## Reproducing the majority guard
+
+```bash
+cd packages/contracts
+SAFE_ADDRESS=<from NEXT_PUBLIC_SAFE_ADDRESS> \
+OWNER2_KEY=<only if the threshold needs a second signer> \
+npx hardhat run scripts/deploy-majority-guard.ts --network hedera-testnet
+```
+
+The Safe core stays unmodified: this uses Safe's own extension point, a **transaction guard**.
+After every `execTransaction`, the Safe calls the guard's `checkAfterExecution`, which reads the
+Safe's owners and threshold and reverts the whole transaction if the threshold is below
+`floor(owners / 2) + 1`. It checks the resulting state rather than decoding calldata, so it covers
+every way to change owners or threshold — including batches — with no list of selectors to keep
+in sync. The guard is stateless, so one deployment can protect any number of Safes. The script,
+in order:
+
+1. Deploys `MajorityThresholdGuard` (or reuses `MAJORITY_GUARD_ADDRESS`).
+2. If the Safe is already below a majority, raises the threshold to one first. Installing the
+   guard on a below-majority Safe would block every transaction except a fix, so this keeps the
+   Safe usable.
+3. Sets the guard through a quorum-approved Safe transaction.
+4. Reads the guard back from the Safe's storage to confirm it's installed.
+
+Two properties worth knowing: the quorum can still remove the guard (`setGuard(address(0))`), but
+only while the Safe is at a majority, since the removal transaction is itself checked; and Safe
+1.4.1 doesn't run guards on module transactions — fine here, because neither module can change
+owners, but a future module that could would bypass it. `test/MajorityThresholdGuard.test.ts`
+covers every case above against a real Safe deployed on the local Hardhat network.
 
 ## License
 
