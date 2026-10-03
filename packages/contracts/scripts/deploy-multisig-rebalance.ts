@@ -6,8 +6,9 @@ import { ethers } from "hardhat";
  *   1. Deploys a fresh `RebalanceModule` — required because `rebalance()` now only accepts calls
  *      from the Safe itself (see AGENTS.md), which the already-deployed module (old bytecode,
  *      `onlySafeOwner`) does not support. Enables it on the Safe.
- *   2. Owner 1 (the deployer) adds owner 2, threshold stays 1-of-2.
- *   3. Owner 1 adds owner 3, threshold rises to 2-of-3 in the same call.
+ *   2. Owner 1 (the deployer) adds owner 2 at 2-of-2 — a majority of two owners, as
+ *      MajorityThresholdGuard requires.
+ *   3. Owners 1 and 2 add owner 3, keeping the threshold at 2 — giving 2-of-3.
  *   4. Builds a real rebalance proposal (WHBAR -> SAUCE) and gets owner 1's approval on-chain via
  *      `approveHash()`.
  *   5. Deliberately tries to execute with only that one approval — proves the quorum is actually
@@ -20,9 +21,9 @@ import { ethers } from "hardhat";
  * Idempotent: every Safe-changing step is routed through `execThroughSafe()`, which checks the
  * Safe's *current* threshold and collects exactly enough approvals for it — so re-running after a
  * partial failure (this took two attempts in practice; see the gas-price note below) does the
- * right thing whether the Safe is still 1-of-1, mid-way at 1-of-2, or already at the final 2-of-3.
+ * right thing whether the Safe is still 1-of-1, mid-way at 2-of-2, or already at the final 2-of-3.
  *
- * Requires SAFE_ADDRESS (the existing Phase 4 Safe) and SAUCERSWAP_ROUTER_ADDRESS from .env, plus
+ * Requires SAFE_ADDRESS (the Safe from deploy.ts) and SAUCERSWAP_ROUTER_ADDRESS from .env, plus
  * OWNER2_ADDRESS/OWNER2_KEY and OWNER3_ADDRESS — two throwaway testnet accounts funded with a
  * small amount of HBAR (Hedera auto-creates the account on first transfer in). Owner 3 only ever
  * needs to be *added* here, never to sign anything, so no OWNER3_KEY is read — keep one around in
@@ -115,19 +116,19 @@ async function main() {
   console.log("Enabling new module on the Safe...");
   await execThroughSafe(safeAddress, safe.interface.encodeFunctionData("enableModule", [moduleAddress]));
 
-  // --- 2 & 3. Owner 1 adds owner 2 (threshold stays 1), then owner 3 (threshold -> 2) ---
+  // --- 2 & 3. Owner 1 adds owner 2 (threshold -> 2), then owner 3 (threshold stays 2) ---
   let owners: string[] = await safe.getOwners();
 
   if (!owners.some((o) => o.toLowerCase() === owner2Address.toLowerCase())) {
-    console.log(`Adding owner 2 (${owner2Address}), threshold stays 1-of-2...`);
-    await execThroughSafe(safeAddress, safe.interface.encodeFunctionData("addOwnerWithThreshold", [owner2Address, 1]));
+    console.log(`Adding owner 2 (${owner2Address}) at 2-of-2...`);
+    await execThroughSafe(safeAddress, safe.interface.encodeFunctionData("addOwnerWithThreshold", [owner2Address, 2]));
   } else {
     console.log(`Owner 2 (${owner2Address}) already present — skipping.`);
   }
 
   owners = await safe.getOwners();
   if (!owners.some((o) => o.toLowerCase() === owner3Address.toLowerCase())) {
-    console.log(`Adding owner 3 (${owner3Address}), threshold rises to 2-of-3...`);
+    console.log(`Adding owner 3 (${owner3Address}), threshold stays 2 (2-of-3)...`);
     await execThroughSafe(safeAddress, safe.interface.encodeFunctionData("addOwnerWithThreshold", [owner3Address, 2]));
   } else {
     console.log(`Owner 3 (${owner3Address}) already present — skipping.`);

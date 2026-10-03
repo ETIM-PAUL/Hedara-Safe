@@ -1,16 +1,16 @@
 import { ethers } from "hardhat";
 
 /**
- * Phase 7: seed the deployed Safe with a real token and trigger a real rebalance through
- * RebalanceModule against SaucerSwap's live V1 router on Hedera testnet, producing the
- * gate-required verifiable testnet transaction.
+ * Seeds a freshly deployed Safe with a real token and triggers a real rebalance through
+ * RebalanceModule against SaucerSwap's live V1 router on Hedera testnet.
  *
  * Pair used: WHBAR -> SAUCE, the deepest-liquidity pool on SaucerSwap testnet
  * (see https://test-api.saucerswap.finance/pools). Both are HTS tokens exposed through their
  * ERC20 facade at the long-zero EVM address of their token ID.
  *
- * Requires SAFE_ADDRESS and MODULE_ADDRESS env vars pointing at the Phase 4 deployment, and the
- * same operator credentials already used for deploy.ts.
+ * Requires SAFE_ADDRESS and MODULE_ADDRESS env vars from deploy.ts's output, and the same operator
+ * credentials. Meant for that fresh 1-of-1, deployer-owned Safe: every Safe call here carries the
+ * deployer's signature alone. On a multi-owner Safe, use the frontend's quorum flow instead.
  */
 
 const WHBAR_HELPER = "0x000000000000000000000000000000000050a8a7"; // 0.0.5286055
@@ -42,11 +42,18 @@ async function main() {
   const moduleAddress = process.env.MODULE_ADDRESS;
   if (!safeAddress || !moduleAddress) {
     throw new Error(
-      "Set SAFE_ADDRESS and MODULE_ADDRESS env vars (from the Phase 4 deploy output)"
+      "Set SAFE_ADDRESS and MODULE_ADDRESS env vars (from deploy.ts's output)"
     );
   }
 
   const safe = await ethers.getContractAt("Safe", safeAddress);
+  const threshold = await safe.getThreshold();
+  if (threshold !== 1n || !(await safe.isOwner(deployer.address))) {
+    throw new Error(
+      `This script signs as the deployer alone, so it needs a 1-of-1 Safe owned by ${deployer.address} ` +
+        `(this one is ${threshold}-of-${(await safe.getOwners()).length}). Use the frontend's quorum flow instead.`
+    );
+  }
   const module = await ethers.getContractAt("RebalanceModule", moduleAddress);
 
   // --- 1. Deployer associates itself with WHBAR and SAUCE (needed to hold/transfer them) ---
@@ -95,6 +102,7 @@ async function main() {
     );
     const receipt = await tx.wait();
     console.log(`  tx ${tx.hash} status=${receipt?.status} (nonce ${nonce})`);
+    return tx.hash;
   };
 
   await associate((data) => safeCall(WHBAR_TOKEN, data), WHBAR_TOKEN, "Safe<->WHBAR");
@@ -110,19 +118,25 @@ async function main() {
   console.log(`Safe WHBAR balance: ${safeWhbarBalance}`);
 
   // --- 5. Trigger the real rebalance through the module ---
+  // rebalance() is onlySafe, so it's called through the Safe's own execTransaction — the same
+  // path a quorum-approved proposal takes in the frontend, here with this 1-of-1 Safe's only owner.
   const deadline = (await ethers.provider.getBlock("latest"))!.timestamp + 600;
-  console.log(`Calling RebalanceModule.rebalance(WHBAR -> SAUCE, amountIn=${amountIn})...`);
-  const rebalanceTx = await module.rebalance(WHBAR_TOKEN, SAUCE_TOKEN, amountIn, 1n, deadline);
-  const rebalanceReceipt = await rebalanceTx.wait();
-  console.log(`Rebalance tx: ${rebalanceTx.hash}`);
-  console.log(`Status: ${rebalanceReceipt?.status === 1 ? "SUCCESS" : "FAILED"}`);
+  console.log(`Calling RebalanceModule.rebalance(WHBAR -> SAUCE, amountIn=${amountIn}) via the Safe...`);
+  const rebalanceData = module.interface.encodeFunctionData("rebalance", [
+    WHBAR_TOKEN,
+    SAUCE_TOKEN,
+    amountIn,
+    1n,
+    deadline
+  ]);
+  const rebalanceTxHash = await safeCall(moduleAddress, rebalanceData);
 
   const sauce = new ethers.Contract(SAUCE_TOKEN, ERC20_ABI, deployer);
   const safeSauceBalance = await sauce.balanceOf(safeAddress);
   console.log(`Safe SAUCE balance after rebalance: ${safeSauceBalance}`);
 
   console.log("\nHashscan link:");
-  console.log(`https://hashscan.io/testnet/transaction/${rebalanceTx.hash}`);
+  console.log(`https://hashscan.io/testnet/transaction/${rebalanceTxHash}`);
 }
 
 main().catch((error) => {

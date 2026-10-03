@@ -53,7 +53,7 @@ something to refactor.
   `execTransactionFromModule`, so never give a module the ability to change owners or threshold;
   and a guard that always reverts would brick the Safe (the removal transaction is checked too) —
   any change here needs `test/MajorityThresholdGuard.test.ts` to keep passing, especially the
-  removal and below-majority-lockdown cases. Installed by `scripts/deploy-majority-guard.ts`, which
+  removal and below-majority-lockdown cases. Installed by `packages/contracts/scripts/deploy-majority-guard.ts`, which
   restores a majority *before* setting the guard.
 - `packages/contracts/contracts/oracle/` — `IPriceOracleAdapter.sol` (the interface every adapter
   implements: `getPrice()`, `refreshFee()`, `refresh()`) and the two real adapters (Chainlink,

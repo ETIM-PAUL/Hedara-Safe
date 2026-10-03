@@ -44,6 +44,9 @@ Two Safe modules do the actual work:
   [Verified testnet transaction](#verified-testnet-transaction) for a real combined switch+trigger
   on testnet.
 
+Alongside them, **`MajorityThresholdGuard`** (a Safe transaction guard) keeps a strict majority of
+owners in charge on-chain — any transaction that would leave, say, 1 of 4 reverts.
+
 Removing either integration removes the point of the module it's in: `RebalanceModule` without
 SaucerSwap is a stock Safe deployment, and `PriceGuardedRebalanceModule` without a real oracle
 adapter has no condition to gate on — it'd just be `RebalanceModule` again, badly.
@@ -76,8 +79,8 @@ adapter has no condition to gate on — it'd just be `RebalanceModule` again, ba
   grows the Safe from 1 to 3 owners, raises the threshold to 2-of-3, and proves a real
   quorum-gated rebalance (including a deliberate premature-execution attempt that must revert) —
   see [Multisig](#multisig-adding-owners-and-quorum-gated-rebalances) below.
-- `packages/contracts/scripts/create-proposals-topic.ts` — creates the HCS topic rebalance
-  proposals get published to — see [Proposal relay via
+- `packages/contracts/scripts/create-proposals-topic.ts` — creates the HCS topic Safe proposals
+  (rebalances and owner changes) get published to — see [Proposal relay via
   HCS](#proposal-relay-via-hcs) below.
 - `packages/frontend` — Next.js app, organized into three tabs (**SafeSwap**, **MultiSig**, **Price
   Guard**): a read-only Safe/treasury ledger and quorum-gated rebalance flow, an owner
@@ -85,8 +88,8 @@ adapter has no condition to gate on — it'd just be `RebalanceModule` again, ba
   Both quorum flows (`lib/multisig.ts` + `lib/useMultisigRebalance.ts`) share one generalized
   propose/approve/execute system — a `SafeProposal` tagged by `kind` (`"rebalance"`, `"addOwner"`,
   or `"removeOwner"`) — with proposals relayed via HCS (`lib/hcs.ts` +
-  `app/api/proposals/route.ts`) and a price-guard section (`lib/usePriceGuard.ts`), all reading
-  the real deployed contracts.
+  `app/api/proposals/route.ts`). The price-guard tab is built on `lib/usePriceGuard.ts`. Everything
+  reads the real deployed contracts.
 
 ## Prerequisites
 
@@ -119,6 +122,9 @@ Then fill in `.env`:
 | `NEXT_PUBLIC_PROPOSALS_TOPIC_ID` | Printed by `create-proposals-topic.ts` — optional, both the SafeSwap and MultiSig tabs fall back to manual copy/paste if unset |
 | `NEXT_PUBLIC_HEDERA_RPC_URL` | Optional — defaults to the same public relay as `HEDERA_TESTNET_RPC_URL`. Lets the frontend read Safe state before a wallet connects |
 | `NEXT_PUBLIC_TOKEN_IN_*` / `NEXT_PUBLIC_TOKEN_OUT_*` | Optional — override which two treasury tokens the dashboard shows. Defaults to the WHBAR/SAUCE pair `demo-rebalance.ts` uses |
+| `SAFE_ADDRESS` / `MODULE_ADDRESS` | Script inputs, not read by the frontend — the Safe and `RebalanceModule` addresses `deploy.ts` printed. Set them here or inline on each command (as the "Reproducing…" sections show) |
+| `SAFE_OWNERS` / `SAFE_THRESHOLD` | Optional, `deploy.ts` only — comma-separated owner addresses and threshold for a multi-owner Safe. Unset means a 1-of-1 Safe owned by the deployer |
+| `MAJORITY_GUARD_ADDRESS` | Optional, `deploy-majority-guard.ts` only — reuse an already deployed guard instead of deploying a new one |
 
 Check the toolchain before deploying anything. None of these need a funded account or a filled-in
 `.env`:
@@ -305,10 +311,10 @@ router, converting the Safe's WHBAR into SAUCE:
 - Result: Safe swapped 2.5 WHBAR for 1.37386050 SAUCE via the SaucerSwap V1 HBAR-SAUCE pool
 - Reproduce with `packages/contracts/scripts/demo-rebalance.ts` — see script header for what it does (HTS association, WHBAR wrap, funding the Safe, then triggering the module)
 
-This transaction predates the quorum-gating change — see
-[Multisig](#multisig-adding-owners-and-quorum-gated-rebalances) below for the current
-`RebalanceModule`, which requires the Safe's own signature over `execTransaction`, not a single
-owner calling it directly.
+This transaction predates the quorum-gating change, when the script called `rebalance()` directly
+as the owner. The current `RebalanceModule` only accepts calls from the Safe itself, so today's
+script goes through the Safe's `execTransaction` instead — see
+[Multisig](#multisig-adding-owners-and-quorum-gated-rebalances) below.
 
 **`PriceGuardedRebalanceModule` with switchable oracles** — deployed at
 [`0x1076c12c4b870AA2aBCb1Eda468FC3e2dECe258D`](https://hashscan.io/testnet/contract/0x1076c12c4b870AA2aBCb1Eda468FC3e2dECe258D),
@@ -500,8 +506,13 @@ This script is what produced the transaction above. It, in order:
 3. Associates the **Safe** with both tokens too, via an owner-authorized `execTransaction` (the
    Safe is a separate account from the deployer, so it needs its own association).
 4. Transfers half the wrapped WHBAR into the Safe.
-5. Calls `RebalanceModule.rebalance()` as the Safe's owner, swapping that WHBAR for SAUCE through
-   the real SaucerSwap V1 router — the transaction linked above.
+5. Calls `RebalanceModule.rebalance()` through the Safe's own `execTransaction` (the module only
+   accepts calls from the Safe), swapping that WHBAR for SAUCE through the real SaucerSwap V1
+   router.
+
+It signs every Safe call as the deployer alone, so it's meant for the fresh 1-of-1 Safe `deploy.ts`
+creates — it stops with an explanation on a multi-owner Safe, where the frontend's quorum flow is
+the way to rebalance.
 
 The token pair, wrap amount, and split are constants near the top of the script — edit them
 directly if you want to reproduce this against a different SaucerSwap pool.
@@ -546,8 +557,9 @@ first transfer in) — they only pay gas for a couple of `approveHash()` calls. 
 produced the proof above. It, in order:
 
 1. Deploys a fresh `RebalanceModule` (see why above) and enables it on the Safe.
-2. Adds owner 2 (threshold stays 1-of-2), then owner 3 (threshold rises to 2-of-3) — skipped if
-   they're already owners, so a re-run after a partial failure doesn't try to re-add them.
+2. Adds owner 2 at 2-of-2, then owner 3 at 2-of-3 — a majority at every step, so this works with
+   `MajorityThresholdGuard` installed. Each is skipped if already an owner, so a re-run after a
+   partial failure doesn't try to re-add them.
 3. Builds a real rebalance proposal and gets owner 1's `approveHash()` on-chain.
 4. Deliberately attempts `execTransaction` with only that one approval — this must revert, or the
    quorum isn't actually being enforced.
@@ -556,7 +568,7 @@ produced the proof above. It, in order:
 
 Every Safe-changing step (including enabling the module) is routed through the same
 threshold-aware helper, so the script works correctly whether the Safe is still 1-of-1, mid-way at
-1-of-2, or already at the final 2-of-3 — which mattered in practice: enabling the module the first
+2-of-2, or already at the final 2-of-3 — which mattered in practice: enabling the module the first
 time only needed owner 1's approval, but a second run (after fixing an unrelated gas-price issue
 below) hit a Safe that was *already* 2-of-3 from the first run's owner-growth steps, so enabling
 required both owners' approval that time. A script that assumed "always 1 owner" would have broken

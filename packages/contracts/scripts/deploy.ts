@@ -123,6 +123,9 @@ async function main() {
 
   console.log("\nCopy this into .env:");
   console.log(`NEXT_PUBLIC_SAFE_ADDRESS=${safeAddress}`);
+  console.log(`NEXT_PUBLIC_MODULE_ADDRESS=${moduleAddress}`);
+  console.log(`SAFE_ADDRESS=${safeAddress}`);
+  console.log(`MODULE_ADDRESS=${moduleAddress}`);
 }
 
 main().catch((error) => {
