@@ -77,7 +77,8 @@ adapter has no condition to gate on — it'd just be `RebalanceModule` again, ba
 
 - Node 20.18.3+
 - A funded Hedera testnet account (testnet HBAR from the [Hedera Portal faucet](https://portal.hedera.com/))
-- A wallet extension that supports Hedera testnet (HashPack or Blade)
+- Any EIP-1193 wallet extension (MetaMask, HashPack, or Blade in EVM mode) — Hedera testnet is a
+  standard EVM chain, so no Hedera-specific wallet SDK is required
 
 ## Setup
 
