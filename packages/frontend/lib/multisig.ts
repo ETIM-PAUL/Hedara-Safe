@@ -3,14 +3,16 @@ import { getSafeAddress, getModuleAddress } from "./safe";
 import { waitForMirrorNode, type RebalanceStatus } from "./txStatus";
 
 /**
- * Owner management and quorum-gated rebalance proposals. `RebalanceModule.rebalance()` requires
- * msg.sender == the Safe itself (see AGENTS.md) — there is no other way to call it. So every
- * rebalance, even under a 1-of-N Safe, goes through the same Safe-transaction machinery here:
- * build the exact (to, data, nonce) tuple, get owners to approve its hash on-chain via
+ * Quorum-gated Safe proposals — generic over *which* Safe transaction is being proposed, not just
+ * `RebalanceModule.rebalance()`. Both a rebalance and an owner-management call
+ * (`addOwnerWithThreshold`/`removeOwner`, both `SelfAuthorized` on the Safe — see AGENTS.md) only
+ * execute via a real Safe `execTransaction`, so every proposal here goes through the same
+ * machinery: build the exact (to, data, nonce) tuple, get owners to approve its hash on-chain via
  * `approveHash()`, then submit `execTransaction()` once enough approvals exist. At threshold 1
- * this collapses to a single click (the proposer's own approval already meets quorum); at a
- * higher threshold it's a real multi-owner flow, since `approveHash()` is what lets an owner
- * commit their approval from their own wallet/session without a backend to relay signatures.
+ * this still takes an explicit "approve" and a separate explicit "execute" click (never auto-
+ * chained — see useMultisigRebalance.ts); at a higher threshold it's a real multi-owner flow,
+ * since `approveHash()` is what lets an owner commit their approval from their own wallet/session
+ * without a backend to relay signatures.
  */
 
 const SAFE_TX_ABI = [
@@ -21,7 +23,10 @@ const SAFE_TX_ABI = [
   "function execTransaction(address to, uint256 value, bytes calldata data, uint8 operation, uint256 safeTxGas, uint256 baseGas, uint256 gasPrice, address gasToken, address refundReceiver, bytes memory signatures) payable returns (bool)"
 ];
 
-const OWNER_MGMT_ABI = ["function addOwnerWithThreshold(address owner, uint256 _threshold)"];
+const OWNER_MGMT_ABI = [
+  "function addOwnerWithThreshold(address owner, uint256 _threshold)",
+  "function removeOwner(address prevOwner, address owner, uint256 _threshold)"
+];
 
 const MODULE_ABI = [
   "function rebalance(address tokenIn, address tokenOut, uint256 amountIn, uint256 amountOutMin, uint256 deadline) returns (uint256)"
@@ -80,52 +85,23 @@ async function runSafeTx(
   return true;
 }
 
-/**
- * Adds an owner while the Safe is still 1-of-N — only works when `signer` is an existing owner
- * and the current threshold lets a single owner act alone (the `msg.sender == owner` shortcut in
- * the approved-hash scheme). Going from 1 owner to 3 is two calls: the first keeps the threshold
- * unchanged, the second raises it to the target in the same call that adds the third owner — both
- * still doable solo, since the threshold only takes effect *after* that call executes.
- */
-export async function addOwner(
-  signer: ethers.Signer,
-  newOwner: string,
-  newThreshold: number,
-  onStatus: (status: RebalanceStatus) => void
-): Promise<void> {
-  const safeAddress = getSafeAddress();
-  const signerAddress = await signer.getAddress();
-  const safe = safeContract(signer);
-  const data = ownerMgmtIface.encodeFunctionData("addOwnerWithThreshold", [newOwner, newThreshold]);
+export type ProposalKind = "rebalance" | "addOwner" | "removeOwner";
 
-  await runSafeTx(
-    () =>
-      safe.execTransaction(
-        safeAddress,
-        0,
-        data,
-        0,
-        0,
-        0,
-        0,
-        ethers.ZeroAddress,
-        ethers.ZeroAddress,
-        approvedHashSignature(signerAddress)
-      ),
-    onStatus
-  );
-}
-
-export interface RebalanceProposal {
+export interface SafeProposal {
+  kind: ProposalKind;
   to: string;
   data: string;
   nonce: string;
-  /** The slippage tolerance (basis points) the proposer used to derive `amountOutMin` from the
-   * quote at propose time. Not part of the Safe transaction itself — `amountOutMin` is what's
-   * actually enforced on-chain — but an approving owner reviewing this proposal should be able to
-   * see what tolerance produced that number without having to reverse-engineer it from a quote
-   * that may have moved since. */
-  slippageBps: number;
+  /** The slippage tolerance (basis points) a `rebalance` proposer used to derive `amountOutMin`
+   * from the quote at propose time. Not part of the Safe transaction itself — `amountOutMin` is
+   * what's actually enforced on-chain — but an approving owner should be able to see what
+   * tolerance produced that number. Unused by owner-management proposals. */
+  slippageBps?: number;
+}
+
+async function nextNonce(provider: ethers.Provider): Promise<string> {
+  const nonce: bigint = await safeContract(provider).nonce();
+  return nonce.toString();
 }
 
 /** The exact Safe transaction a rebalance becomes — every approving owner is agreeing to this
@@ -139,7 +115,7 @@ export async function buildRebalanceProposal(
   amountOutMin: bigint,
   deadline: number,
   slippageBps: number
-): Promise<RebalanceProposal> {
+): Promise<SafeProposal> {
   const data = moduleIface.encodeFunctionData("rebalance", [
     tokenIn,
     tokenOut,
@@ -147,33 +123,58 @@ export async function buildRebalanceProposal(
     amountOutMin,
     deadline
   ]);
-  const nonce: bigint = await safeContract(provider).nonce();
-  return {
-    to: getModuleAddress(),
-    data,
-    nonce: nonce.toString(),
-    slippageBps
-  };
+  return { kind: "rebalance", to: getModuleAddress(), data, nonce: await nextNonce(provider), slippageBps };
+}
+
+/** The Safe transaction that adds `owner` at `threshold`. `addOwnerWithThreshold` is
+ * `SelfAuthorized` on the Safe — the only way to call it is a Safe transaction targeting the Safe
+ * itself (`to = address(safe)`), which is why this needs the same propose/approve/execute
+ * machinery as a rebalance even though no module is involved. */
+export async function buildAddOwnerProposal(
+  provider: ethers.Provider,
+  newOwner: string,
+  newThreshold: number
+): Promise<SafeProposal> {
+  const data = ownerMgmtIface.encodeFunctionData("addOwnerWithThreshold", [newOwner, newThreshold]);
+  return { kind: "addOwner", to: getSafeAddress(), data, nonce: await nextNonce(provider) };
+}
+
+/** The Safe transaction that removes `ownerToRemove` and sets the threshold to `newThreshold`.
+ * `removeOwner` needs `prevOwner` — the owner immediately before it in the Safe's internal linked
+ * list — for O(1) removal; `getOwners()` returns owners in that same list order, so
+ * `owners[i - 1]` (or the sentinel `0x1` if removing the first entry) is always correct. */
+export async function buildRemoveOwnerProposal(
+  provider: ethers.Provider,
+  owners: string[],
+  ownerToRemove: string,
+  newThreshold: number
+): Promise<SafeProposal> {
+  const index = owners.findIndex((o) => o.toLowerCase() === ownerToRemove.toLowerCase());
+  if (index === -1) throw new Error("That address isn't a current owner.");
+  const SENTINEL_OWNERS = "0x0000000000000000000000000000000000000001";
+  const prevOwner = index === 0 ? SENTINEL_OWNERS : owners[index - 1];
+  const data = ownerMgmtIface.encodeFunctionData("removeOwner", [prevOwner, ownerToRemove, newThreshold]);
+  return { kind: "removeOwner", to: getSafeAddress(), data, nonce: await nextNonce(provider) };
 }
 
 /** Proposals are shared between owners by copy/paste or the HCS relay (see hcs.ts) — a compact
  * blob of exactly the fields that determine the Safe transaction hash, nothing recomputed from
  * a live quote, so every owner is reviewing and approving the identical transaction. */
-export function encodeProposal(proposal: RebalanceProposal): string {
+export function encodeProposal(proposal: SafeProposal): string {
   return btoa(JSON.stringify(proposal));
 }
 
-export function decodeProposal(blob: string): RebalanceProposal {
-  let parsed: Partial<RebalanceProposal>;
+export function decodeProposal(blob: string): SafeProposal {
+  let parsed: Partial<SafeProposal>;
   try {
     parsed = JSON.parse(atob(blob.trim()));
   } catch {
     throw new Error("That doesn't look like a valid proposal — check it was copied in full.");
   }
-  if (!parsed.to || !parsed.data || parsed.nonce === undefined) {
+  if (!parsed.kind || !parsed.to || !parsed.data || parsed.nonce === undefined) {
     throw new Error("That doesn't look like a valid proposal — missing required fields.");
   }
-  return parsed as RebalanceProposal;
+  return parsed as SafeProposal;
 }
 
 /** The Safe's current nonce — a proposal's own `nonce` field must still match this for its hash
@@ -183,7 +184,7 @@ export async function getSafeNonce(provider: ethers.Provider): Promise<bigint> {
   return safeContract(provider).nonce();
 }
 
-export async function getProposalHash(provider: ethers.Provider, proposal: RebalanceProposal): Promise<string> {
+export async function getProposalHash(provider: ethers.Provider, proposal: SafeProposal): Promise<string> {
   return safeContract(provider).getTransactionHash(
     proposal.to,
     0,
@@ -218,12 +219,12 @@ export async function approveProposal(
   await runSafeTx(() => safe.approveHash(hash), onStatus);
 }
 
-/** Submits the actual rebalance once enough owners have approved — anyone can call this (it
- * doesn't need to be an owner), since the signatures already carry every approving owner's
- * on-chain-recorded consent. */
+/** Submits the proposal's action (rebalance or owner add/remove) once enough owners have
+ * approved — anyone can call this (it doesn't need to be an owner), since the signatures already
+ * carry every approving owner's on-chain-recorded consent. */
 export async function executeProposal(
   signer: ethers.Signer,
-  proposal: RebalanceProposal,
+  proposal: SafeProposal,
   approvedOwners: string[],
   onStatus: (status: RebalanceStatus) => void
 ): Promise<boolean> {
@@ -248,26 +249,49 @@ export async function executeProposal(
   );
 }
 
-export interface DecodedRebalance {
-  tokenIn: string;
-  tokenOut: string;
-  amountIn: bigint;
-  amountOutMin: bigint;
-  deadline: number;
-}
+export type DecodedAction =
+  | {
+      kind: "rebalance";
+      tokenIn: string;
+      tokenOut: string;
+      amountIn: bigint;
+      amountOutMin: bigint;
+      deadline: number;
+    }
+  | { kind: "addOwner"; owner: string; threshold: number }
+  | { kind: "removeOwner"; prevOwner: string; owner: string; threshold: number };
 
-/** Decodes a proposal's raw calldata back into readable fields — what an approving owner should
- * actually inspect before approving, since the blob itself could have come from anyone. */
-export function decodeRebalanceCalldata(data: string): DecodedRebalance {
-  const [tokenIn, tokenOut, amountIn, amountOutMin, deadline] = moduleIface.decodeFunctionData(
-    "rebalance",
-    data
-  );
-  return {
-    tokenIn: tokenIn as string,
-    tokenOut: tokenOut as string,
-    amountIn: amountIn as bigint,
-    amountOutMin: amountOutMin as bigint,
-    deadline: Number(deadline)
-  };
+/** Decodes a proposal's raw calldata back into readable fields, dispatching on `proposal.kind` to
+ * the right ABI — what an approving owner should actually inspect before approving, since the
+ * blob itself could have come from anyone. */
+export function decodeProposalAction(proposal: SafeProposal): DecodedAction {
+  switch (proposal.kind) {
+    case "rebalance": {
+      const [tokenIn, tokenOut, amountIn, amountOutMin, deadline] = moduleIface.decodeFunctionData(
+        "rebalance",
+        proposal.data
+      );
+      return {
+        kind: "rebalance",
+        tokenIn: tokenIn as string,
+        tokenOut: tokenOut as string,
+        amountIn: amountIn as bigint,
+        amountOutMin: amountOutMin as bigint,
+        deadline: Number(deadline)
+      };
+    }
+    case "addOwner": {
+      const [owner, threshold] = ownerMgmtIface.decodeFunctionData("addOwnerWithThreshold", proposal.data);
+      return { kind: "addOwner", owner: owner as string, threshold: Number(threshold) };
+    }
+    case "removeOwner": {
+      const [prevOwner, owner, threshold] = ownerMgmtIface.decodeFunctionData("removeOwner", proposal.data);
+      return {
+        kind: "removeOwner",
+        prevOwner: prevOwner as string,
+        owner: owner as string,
+        threshold: Number(threshold)
+      };
+    }
+  }
 }

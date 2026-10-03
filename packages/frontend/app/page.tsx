@@ -14,7 +14,7 @@ import {
   type TreasuryToken
 } from "@/lib/safe";
 import { getQuote, applySlippage, DEADLINE_WINDOW_SECONDS, type Quote } from "@/lib/rebalance";
-import { addOwner } from "@/lib/multisig";
+import { buildRebalanceProposal, buildAddOwnerProposal, buildRemoveOwnerProposal } from "@/lib/multisig";
 import { useMultisigRebalance } from "@/lib/useMultisigRebalance";
 import { hashscanTxUrl, hashscanContractUrl, type RebalanceStatus, type RebalanceStage } from "@/lib/txStatus";
 import { shortenAddress } from "@/lib/format";
@@ -78,6 +78,152 @@ function StatusTracker({ status }: { status: RebalanceStatus | null }) {
         </p>
       )}
     </>
+  );
+}
+
+/**
+ * The topic-fetched "Proposals from other owners" list, shared by the Rebalance and Owners
+ * sections — each just passes its own `useMultisigRebalance` instance, already filtered to the
+ * proposal kinds that section cares about.
+ */
+function RecentProposalsCard({ guard }: { guard: ReturnType<typeof useMultisigRebalance> }) {
+  if (!guard.hasProposalsTopic || guard.proposal) return null;
+  return (
+    <div className="ledger-card" style={{ marginTop: "1rem" }}>
+      <div className="action-row" style={{ marginTop: 0 }}>
+        <p className="section-label" style={{ margin: 0 }}>
+          Proposals from other owners
+        </p>
+        <button
+          className="btn btn-secondary"
+          onClick={() => guard.refreshRecentProposals()}
+          disabled={guard.recentProposalsLoading}
+        >
+          {guard.recentProposalsLoading ? "Refreshing…" : "Refresh"}
+        </button>
+      </div>
+      {guard.recentProposals.length === 0 ? (
+        <p className="ledger-key">{guard.recentProposalsLoading ? "Loading…" : "None published yet."}</p>
+      ) : (
+        guard.recentProposals.map((p) => (
+          <div className="ledger-row" key={p.topic.sequenceNumber}>
+            <span className="ledger-key">
+              #{p.topic.sequenceNumber} —{" "}
+              {new Date(Number(p.topic.consensusTimestamp.split(".")[0]) * 1000).toLocaleString()}
+            </span>
+            <span className="ledger-value">
+              <button className="btn btn-secondary" onClick={() => guard.loadProposal(p.topic.blob)}>
+                Load
+              </button>
+            </span>
+          </div>
+        ))
+      )}
+    </div>
+  );
+}
+
+/** The paste-box fallback, shared by both sections — shown when there's no active proposal. */
+function PasteProposalBox({ guard }: { guard: ReturnType<typeof useMultisigRebalance> }) {
+  if (guard.proposal) return null;
+  return (
+    <div className="swap-form" style={{ marginTop: "1rem" }}>
+      <textarea
+        className="swap-input"
+        style={{ width: "100%", minHeight: "3rem" }}
+        placeholder="Or paste a shared proposal to review and approve"
+        value={guard.pasteInput}
+        onChange={(e) => guard.setPasteInput(e.target.value)}
+      />
+      <button className="btn btn-secondary" onClick={() => guard.loadProposal(guard.pasteInput)}>
+        Load proposal
+      </button>
+    </div>
+  );
+}
+
+/**
+ * The pending-proposal card, shared by the Rebalance and Owners sections — approvals, the stale
+ * warning, and the Approve/Execute/Copy/Discard actions are identical regardless of what the
+ * proposal actually does; only `summary` (the decoded-action-specific rows above them) differs.
+ */
+function ProposalCard({
+  guard,
+  threshold,
+  isOwner,
+  account,
+  onApprove,
+  onExecute,
+  onCopy,
+  summary
+}: {
+  guard: ReturnType<typeof useMultisigRebalance>;
+  threshold: number;
+  isOwner: boolean;
+  account: string | null;
+  onApprove: () => void;
+  onExecute: () => void;
+  onCopy: () => void;
+  summary: React.ReactNode;
+}) {
+  if (!guard.proposal || !guard.decoded) return null;
+  const proposalMet = guard.approvals.length >= threshold;
+
+  return (
+    <div className={`ledger-card${guard.isStale ? " stale" : ""}`}>
+      <p className="section-label">Pending proposal</p>
+      {summary}
+      <div className="ledger-row">
+        <span className="ledger-key">Approvals</span>
+        <span className="ledger-value">
+          <span className={`status-dot ${proposalMet ? "on" : "off"}`} />
+          {guard.approvals.length} of {threshold}
+          {guard.approvals.length > 0 && (
+            <>
+              {" ("}
+              {guard.approvals.map((o, i) => (
+                <span key={o}>
+                  {i > 0 && ", "}
+                  <span title={o}>{shortenAddress(o)}</span>
+                </span>
+              ))}
+              {")"}
+            </>
+          )}
+        </span>
+      </div>
+
+      {guard.isStale && (
+        <div className="callout">
+          <span className="status-dot off" />
+          <span>
+            {guard.isExpired ? "Deadline passed." : "Safe's nonce moved — stale."} Discard and propose
+            again.
+          </span>
+        </div>
+      )}
+
+      <div className="action-row">
+        <div className="action-row-primary">
+          {isOwner && !guard.approvals.some((o) => o.toLowerCase() === account?.toLowerCase()) && (
+            <button className="btn" onClick={onApprove} disabled={guard.isRunning || guard.isStale}>
+              Approve
+            </button>
+          )}
+          <button className="btn" onClick={onExecute} disabled={guard.isRunning || !proposalMet || guard.isStale}>
+            Execute now
+          </button>
+        </div>
+        <div className="action-row-secondary">
+          <button className="btn btn-secondary" onClick={onCopy} disabled={guard.isRunning}>
+            Copy proposal to share
+          </button>
+          <button className="btn btn-secondary" onClick={guard.reset} disabled={guard.isRunning}>
+            Discard
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -248,7 +394,8 @@ export default function Home() {
   const [quoteError, setQuoteError] = useState<string | null>(null);
   const [quoteLoading, setQuoteLoading] = useState(false);
   const [newOwnerAddress, setNewOwnerAddress] = useState("");
-  const [ownerStatus, setOwnerStatus] = useState<RebalanceStatus | null>(null);
+  const [newOwnerThreshold, setNewOwnerThreshold] = useState("1");
+  const [activeTab, setActiveTab] = useState<"safeswap" | "multisig" | "priceguard">("safeswap");
 
   function showToast(message: string) {
     setToast(message);
@@ -401,11 +548,33 @@ export default function Home() {
     resetConnection();
   }
 
-  /** Owner 1 uses this twice, while the Safe is still 1-of-N, to reach the target 2-of-3: the
-   * first call adds a 2nd owner and keeps the threshold at 1; the second adds the 3rd owner and
-   * raises the threshold to 2 in the same call — both still doable solo, since the new threshold
-   * only takes effect once that call has already executed. See AGENTS.md for why. */
-  async function handleAddOwner() {
+  const multisig = useMultisigRebalance({
+    provider,
+    owners: safeState?.owners ?? [],
+    threshold: safeState?.threshold ?? 1,
+    relevantKinds: ["rebalance"],
+    onConfirmed: async () => {
+      if (provider) await loadSafeData(provider);
+    },
+    setToast: showToast
+  });
+
+  const ownersProposal = useMultisigRebalance({
+    provider,
+    owners: safeState?.owners ?? [],
+    threshold: safeState?.threshold ?? 1,
+    relevantKinds: ["addOwner", "removeOwner"],
+    onConfirmed: async () => {
+      if (provider) await loadSafeData(provider);
+    },
+    setToast: showToast
+  });
+
+  /** Proposes adding `newOwnerAddress` at `newOwnerThreshold` — a real quorum-gated Safe
+   * transaction (`addOwnerWithThreshold` is `SelfAuthorized`), not a solo action, except that at
+   * threshold 1 "propose" and "approve" collapse into the same click since there's only one
+   * owner to satisfy. */
+  async function handleProposeAddOwner() {
     if (!provider || !safeState) return;
     if (!ethers.isAddress(newOwnerAddress)) {
       showToast("Enter a valid EVM address for the new owner.");
@@ -415,27 +584,53 @@ export default function Home() {
       showToast("That address is already an owner.");
       return;
     }
-    const nextThreshold = safeState.owners.length === 1 ? 1 : 2;
-    setOwnerStatus(null);
+    const nextThreshold = Number(newOwnerThreshold);
+    if (!Number.isInteger(nextThreshold) || nextThreshold < 1 || nextThreshold > safeState.owners.length + 1) {
+      showToast(`Threshold must be between 1 and ${safeState.owners.length + 1}.`);
+      return;
+    }
     const signer = await provider.getSigner();
-    await addOwner(signer, newOwnerAddress, nextThreshold, async (next) => {
-      setOwnerStatus(next);
-      if (next.stage === "confirmed") {
-        setNewOwnerAddress("");
-        await loadSafeData(provider);
-      }
-    });
+    const built = await buildAddOwnerProposal(provider, newOwnerAddress, nextThreshold);
+    await ownersProposal.propose(signer, built);
+    setNewOwnerAddress("");
   }
 
-  const multisig = useMultisigRebalance({
-    provider,
-    owners: safeState?.owners ?? [],
-    threshold: safeState?.threshold ?? 1,
-    onConfirmed: async () => {
-      if (provider) await loadSafeData(provider);
-    },
-    setToast: showToast
-  });
+  /** Proposes removing `ownerToRemove`, auto-shrinking the threshold to fit the remaining owner
+   * count rather than exposing another input — removal's threshold constraint is mechanical
+   * (Safe requires `1 <= threshold <= remainingOwners`), unlike add-owner's, which is a real
+   * choice the proposer should see and can change. */
+  async function handleProposeRemoveOwner(ownerToRemove: string) {
+    if (!provider || !safeState) return;
+    const remaining = safeState.owners.length - 1;
+    const nextThreshold = Math.min(safeState.threshold, remaining);
+    if (nextThreshold < 1) {
+      showToast("Can't remove the Safe's last owner.");
+      return;
+    }
+    const signer = await provider.getSigner();
+    const built = await buildRemoveOwnerProposal(provider, safeState.owners, ownerToRemove, nextThreshold);
+    await ownersProposal.propose(signer, built);
+  }
+
+  async function handleOwnersApprove() {
+    if (!provider) return;
+    await ownersProposal.approve(await provider.getSigner());
+  }
+
+  async function handleOwnersExecute() {
+    if (!provider) return;
+    await ownersProposal.executeNow(await provider.getSigner());
+  }
+
+  async function handleOwnersCopy() {
+    if (!ownersProposal.shareableBlob) return;
+    try {
+      await navigator.clipboard.writeText(ownersProposal.shareableBlob);
+      showToast("Proposal copied — send it to the other owners to approve.");
+    } catch {
+      showToast("Couldn't access the clipboard — copy the text manually.");
+    }
+  }
 
   function tokenByAddress(address: string): TreasuryToken | undefined {
     return [tokenA, tokenB].find((t) => t.address.toLowerCase() === address.toLowerCase());
@@ -473,7 +668,8 @@ export default function Home() {
     const amountIn = ethers.parseUnits(amount, tokenIn.decimals);
     const min = applySlippage(quote.amountOut, slippageBps);
     const deadline = Math.floor(Date.now() / 1000) + DEADLINE_WINDOW_SECONDS;
-    await multisig.propose(signer, tokenIn.address, tokenOut.address, amountIn, min, deadline, slippageBps);
+    const built = await buildRebalanceProposal(provider, tokenIn.address, tokenOut.address, amountIn, min, deadline, slippageBps);
+    await multisig.propose(signer, built);
   }
 
   async function handleApprove() {
@@ -510,7 +706,6 @@ export default function Home() {
 
   const isOwner = !!account && !!safeState?.owners.some((o) => o.toLowerCase() === account.toLowerCase());
   const threshold = safeState?.threshold ?? 1;
-  const proposalMet = multisig.approvals.length >= threshold;
 
   return (
     <main className="page">
@@ -540,6 +735,30 @@ export default function Home() {
       {error && <p className="error-line">{error}</p>}
       {configError && <p className="error-line">{configError}</p>}
 
+      <div className="tabs">
+        <button
+          className={`tab${activeTab === "safeswap" ? " active" : ""}`}
+          onClick={() => setActiveTab("safeswap")}
+        >
+          SafeSwap
+        </button>
+        <button
+          className={`tab${activeTab === "multisig" ? " active" : ""}`}
+          onClick={() => setActiveTab("multisig")}
+        >
+          MultiSig
+        </button>
+        {priceGuardAddress && (
+          <button
+            className={`tab${activeTab === "priceguard" ? " active" : ""}`}
+            onClick={() => setActiveTab("priceguard")}
+          >
+            Price Guard
+          </button>
+        )}
+      </div>
+
+      {activeTab === "safeswap" && (
       <section className="ledger-section">
         <p className="section-label">Safe</p>
         {safeAddress && (
@@ -578,8 +797,42 @@ export default function Home() {
                 {safeState.moduleEnabled ? "enabled" : "not enabled"}
               </span>
             </div>
+          </>
+        )}
+      </section>
+      )}
 
-            {isOwner && safeState.threshold === 1 && safeState.owners.length < 3 && (
+      {activeTab === "multisig" && (
+      <section className="ledger-section">
+        <p className="section-label">Owners</p>
+        <p className="section-desc">
+          Adding or removing an owner changes who must sign, and can change the quorum itself —
+          this goes through the same propose/approve/execute flow as a rebalance, never a single
+          click.
+        </p>
+
+        {safeState && (
+          <>
+            {safeState.owners.map((o) => (
+              <div className="ledger-row" key={o}>
+                <span className="ledger-key" title={o}>
+                  {shortenAddress(o)}
+                </span>
+                <span className="ledger-value">
+                  {isOwner && safeState.owners.length > 1 && (
+                    <button
+                      className="btn btn-secondary"
+                      onClick={() => handleProposeRemoveOwner(o)}
+                      disabled={ownersProposal.isRunning || !!ownersProposal.proposal}
+                    >
+                      Remove
+                    </button>
+                  )}
+                </span>
+              </div>
+            ))}
+
+            {isOwner && !ownersProposal.proposal && (
               <div className="swap-form" style={{ marginTop: "1rem" }}>
                 <input
                   className="swap-input"
@@ -587,31 +840,57 @@ export default function Home() {
                   placeholder="0x… new owner address"
                   value={newOwnerAddress}
                   onChange={(e) => setNewOwnerAddress(e.target.value)}
-                  disabled={ownerStatus !== null && ownerStatus.stage !== "confirmed" && ownerStatus.stage !== "failed"}
+                  disabled={ownersProposal.isRunning}
                 />
-                <button
-                  className="btn"
-                  onClick={handleAddOwner}
-                  disabled={
-                    ownerStatus !== null && ownerStatus.stage !== "confirmed" && ownerStatus.stage !== "failed"
-                  }
-                >
-                  Add owner ({safeState.owners.length}/3)
+                <label className="slippage-control">
+                  New threshold
+                  <input
+                    className="slippage-input"
+                    type="number"
+                    min="1"
+                    max={safeState.owners.length + 1}
+                    value={newOwnerThreshold}
+                    onChange={(e) => setNewOwnerThreshold(e.target.value)}
+                    disabled={ownersProposal.isRunning}
+                  />
+                </label>
+                <button className="btn" onClick={handleProposeAddOwner} disabled={ownersProposal.isRunning}>
+                  {ownersProposal.isRunning ? "Working…" : "Propose add owner"}
                 </button>
               </div>
             )}
-            {isOwner && safeState.threshold === 1 && safeState.owners.length < 3 && (
-              <p className="hint" style={{ marginTop: "0.5rem" }}>
-                {safeState.owners.length === 1
-                  ? "Adds owner 2, threshold stays 1-of-2."
-                  : "Adds owner 3 and raises the threshold to 2-of-3."}
-              </p>
-            )}
-            <StatusTracker status={ownerStatus} />
           </>
         )}
-      </section>
 
+        <RecentProposalsCard guard={ownersProposal} />
+        <PasteProposalBox guard={ownersProposal} />
+
+        <ProposalCard
+          guard={ownersProposal}
+          threshold={threshold}
+          isOwner={isOwner}
+          account={account}
+          onApprove={handleOwnersApprove}
+          onExecute={handleOwnersExecute}
+          onCopy={handleOwnersCopy}
+          summary={
+            ownersProposal.decoded && ownersProposal.decoded.kind !== "rebalance" && (
+              <div className="ledger-row">
+                <span className="ledger-key">{ownersProposal.decoded.kind === "addOwner" ? "Add" : "Remove"} owner</span>
+                <span className="ledger-value" title={ownersProposal.decoded.owner}>
+                  {shortenAddress(ownersProposal.decoded.owner)} — new threshold {ownersProposal.decoded.threshold}
+                </span>
+              </div>
+            )
+          }
+        />
+
+        <StatusTracker status={ownersProposal.status} />
+      </section>
+      )}
+
+      {activeTab === "safeswap" && (
+      <>
       <section className="ledger-section">
         <p className="section-label">Holdings</p>
         {balances ? (
@@ -686,140 +965,52 @@ export default function Home() {
           </p>
         )}
 
-        {threshold > 1 && !multisig.proposal && multisig.hasProposalsTopic && (
-          <div className="ledger-card" style={{ marginTop: "1rem" }}>
-            <div className="action-row" style={{ marginTop: 0 }}>
-              <p className="section-label" style={{ margin: 0 }}>
-                Proposals from other owners
-              </p>
-              <button
-                className="btn btn-secondary"
-                onClick={() => multisig.refreshRecentProposals()}
-                disabled={multisig.recentProposalsLoading}
-              >
-                {multisig.recentProposalsLoading ? "Refreshing…" : "Refresh"}
-              </button>
-            </div>
-            {multisig.recentProposals.length === 0 ? (
-              <p className="ledger-key">
-                {multisig.recentProposalsLoading ? "Loading…" : "None published yet."}
-              </p>
-            ) : (
-              multisig.recentProposals.map((p) => (
-                <div className="ledger-row" key={p.sequenceNumber}>
-                  <span className="ledger-key">
-                    #{p.sequenceNumber} — {new Date(Number(p.consensusTimestamp.split(".")[0]) * 1000).toLocaleString()}
-                  </span>
+        <RecentProposalsCard guard={multisig} />
+        <PasteProposalBox guard={multisig} />
+
+        <ProposalCard
+          guard={multisig}
+          threshold={threshold}
+          isOwner={isOwner}
+          account={account}
+          onApprove={handleApprove}
+          onExecute={handleExecuteNow}
+          onCopy={handleCopyProposal}
+          summary={
+            multisig.decoded &&
+            multisig.decoded.kind === "rebalance" && (
+              <>
+                <div className="ledger-row">
+                  <span className="ledger-key">Swap</span>
                   <span className="ledger-value">
-                    <button className="btn btn-secondary" onClick={() => multisig.loadProposal(p.blob)}>
-                      Load
-                    </button>
+                    {formatTokenAmount(multisig.decoded.tokenIn, multisig.decoded.amountIn)} → min{" "}
+                    {formatTokenAmount(multisig.decoded.tokenOut, multisig.decoded.amountOutMin)}
                   </span>
                 </div>
-              ))
-            )}
-          </div>
-        )}
-
-        {threshold > 1 && !multisig.proposal && (
-          <div className="swap-form" style={{ marginTop: "1rem" }}>
-            <textarea
-              className="swap-input"
-              style={{ width: "100%", minHeight: "3rem" }}
-              placeholder="Or paste a shared proposal to review and approve"
-              value={multisig.pasteInput}
-              onChange={(e) => multisig.setPasteInput(e.target.value)}
-            />
-            <button className="btn btn-secondary" onClick={() => multisig.loadProposal(multisig.pasteInput)}>
-              Load proposal
-            </button>
-          </div>
-        )}
-
-        {multisig.proposal && multisig.decoded && (
-          <div className={`ledger-card${multisig.isStale ? " stale" : ""}`}>
-            <p className="section-label">Pending proposal</p>
-            <div className="ledger-row">
-              <span className="ledger-key">Swap</span>
-              <span className="ledger-value">
-                {formatTokenAmount(multisig.decoded.tokenIn, multisig.decoded.amountIn)} → min{" "}
-                {formatTokenAmount(multisig.decoded.tokenOut, multisig.decoded.amountOutMin)}
-              </span>
-            </div>
-            {typeof multisig.proposal.slippageBps === "number" && (
-              <div className="ledger-row">
-                <span className="ledger-key">Slippage used</span>
-                <span className="ledger-value">{(multisig.proposal.slippageBps / 100).toFixed(2)}%</span>
-              </div>
-            )}
-            <div className="ledger-row">
-              <span className="ledger-key">Deadline</span>
-              <span className="ledger-value">
-                {new Date(multisig.decoded.deadline * 1000).toLocaleString()}
-                {multisig.isExpired ? " — passed" : ""}
-              </span>
-            </div>
-            <div className="ledger-row">
-              <span className="ledger-key">Approvals</span>
-              <span className="ledger-value">
-                <span className={`status-dot ${proposalMet ? "on" : "off"}`} />
-                {multisig.approvals.length} of {threshold}
-                {multisig.approvals.length > 0 && (
-                  <>
-                    {" ("}
-                    {multisig.approvals.map((o, i) => (
-                      <span key={o}>
-                        {i > 0 && ", "}
-                        <span title={o}>{shortenAddress(o)}</span>
-                      </span>
-                    ))}
-                    {")"}
-                  </>
+                {typeof multisig.proposal?.slippageBps === "number" && (
+                  <div className="ledger-row">
+                    <span className="ledger-key">Slippage used</span>
+                    <span className="ledger-value">{(multisig.proposal.slippageBps / 100).toFixed(2)}%</span>
+                  </div>
                 )}
-              </span>
-            </div>
-
-            {multisig.isStale && (
-              <div className="callout">
-                <span className="status-dot off" />
-                <span>
-                  {multisig.isExpired ? "Deadline passed." : "Safe's nonce moved — stale."} Discard
-                  and propose again.
-                </span>
-              </div>
-            )}
-
-            <div className="action-row">
-              <div className="action-row-primary">
-                {isOwner && !multisig.approvals.some((o) => o.toLowerCase() === account?.toLowerCase()) && (
-                  <button className="btn" onClick={handleApprove} disabled={multisig.isRunning || multisig.isStale}>
-                    Approve
-                  </button>
-                )}
-                <button
-                  className="btn"
-                  onClick={handleExecuteNow}
-                  disabled={multisig.isRunning || !proposalMet || multisig.isStale}
-                >
-                  Execute now
-                </button>
-              </div>
-              <div className="action-row-secondary">
-                <button className="btn btn-secondary" onClick={handleCopyProposal} disabled={multisig.isRunning}>
-                  Copy proposal to share
-                </button>
-                <button className="btn btn-secondary" onClick={multisig.reset} disabled={multisig.isRunning}>
-                  Discard
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
+                <div className="ledger-row">
+                  <span className="ledger-key">Deadline</span>
+                  <span className="ledger-value">
+                    {new Date(multisig.decoded.deadline * 1000).toLocaleString()}
+                    {multisig.isExpired ? " — passed" : ""}
+                  </span>
+                </div>
+              </>
+            )
+          }
+        />
 
         <StatusTracker status={multisig.status} />
       </section>
+      </>
+      )}
 
-      {priceGuardAddress && (
+      {activeTab === "priceguard" && priceGuardAddress && (
         <PriceGuardSection
           title="Price Guard (HBAR/USD)"
           description="Permissionless — executes only if HBAR/USD meets the condition below. WHBAR tracks HBAR 1:1; SAUCE isn't gated."
@@ -833,7 +1024,7 @@ export default function Home() {
             `WHBAR ${s.comparison === Comparison.Below ? "≤" : "≥"} $${(Number(s.triggerPrice) * 10 ** s.triggerExpo).toFixed(6)}`
           }
           formatObserved={(priceHuman) => `$${priceHuman}`}
-          reproduceHint="Reproduce with packages/contracts/scripts/deploy-oracle-adapters.ts."
+          reproduceHint=""
         />
       )}
 
