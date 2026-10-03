@@ -23,9 +23,11 @@ import { ethers } from "hardhat";
  * right thing whether the Safe is still 1-of-1, mid-way at 1-of-2, or already at the final 2-of-3.
  *
  * Requires SAFE_ADDRESS (the existing Phase 4 Safe) and SAUCERSWAP_ROUTER_ADDRESS from .env, plus
- * OWNER2_ADDRESS/OWNER2_KEY and OWNER3_ADDRESS/OWNER3_KEY — two throwaway testnet accounts funded
- * with a small amount of HBAR (Hedera auto-creates the account on first transfer in). The Safe
- * must already hold some WHBAR — run demo-rebalance.ts first if it doesn't.
+ * OWNER2_ADDRESS/OWNER2_KEY and OWNER3_ADDRESS — two throwaway testnet accounts funded with a
+ * small amount of HBAR (Hedera auto-creates the account on first transfer in). Owner 3 only ever
+ * needs to be *added* here, never to sign anything, so no OWNER3_KEY is read — keep one around in
+ * .env anyway if you plan to have it actively approve something later. The Safe must already hold
+ * some WHBAR — run demo-rebalance.ts first if it doesn't.
  */
 
 const WHBAR_TOKEN = "0x0000000000000000000000000000000000003ad2"; // 0.0.15058
