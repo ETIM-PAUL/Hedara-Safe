@@ -120,12 +120,15 @@ async function main() {
   // --- 5. Trigger the real rebalance through the module ---
   // rebalance() is onlySafe, so it's called through the Safe's own execTransaction — the same
   // path a quorum-approved proposal takes in the frontend, here with this 1-of-1 Safe's only owner.
+  // Swaps half of what was sent in, so the Safe ends up holding both tokens and the frontend can
+  // rebalance in either direction straight away.
+  const swapAmount = amountIn / 2n;
   const deadline = (await ethers.provider.getBlock("latest"))!.timestamp + 600;
-  console.log(`Calling RebalanceModule.rebalance(WHBAR -> SAUCE, amountIn=${amountIn}) via the Safe...`);
+  console.log(`Calling RebalanceModule.rebalance(WHBAR -> SAUCE, amountIn=${swapAmount}) via the Safe...`);
   const rebalanceData = module.interface.encodeFunctionData("rebalance", [
     WHBAR_TOKEN,
     SAUCE_TOKEN,
-    amountIn,
+    swapAmount,
     1n,
     deadline
   ]);
@@ -133,7 +136,7 @@ async function main() {
 
   const sauce = new ethers.Contract(SAUCE_TOKEN, ERC20_ABI, deployer);
   const safeSauceBalance = await sauce.balanceOf(safeAddress);
-  console.log(`Safe SAUCE balance after rebalance: ${safeSauceBalance}`);
+  console.log(`Safe balances after rebalance: ${await whbar.balanceOf(safeAddress)} WHBAR, ${safeSauceBalance} SAUCE`);
 
   console.log("\nHashscan link:");
   console.log(`https://hashscan.io/testnet/transaction/${rebalanceTxHash}`);

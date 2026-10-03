@@ -15,7 +15,7 @@ _Live testnet state, viewed as one of the Safe's three owners. Each tab is descr
 [Run the frontend](#run-the-frontend)._
 
 **Contents:** [What's here](#whats-here) ·
-[Setup](#setup) · [Deploy](#deploy-contracts-to-hedera-testnet) ·
+[Setup](#setup) · [Deploy](#deploy-contracts-to-hedera-testnet) · [Fund the Safe](#fund-the-safe) ·
 [Run the frontend](#run-the-frontend) · [Architecture](#architecture) ·
 [Verified testnet transaction](#verified-testnet-transaction) ·
 [Multisig](#multisig-adding-owners-and-quorum-gated-rebalances) ·
@@ -151,13 +151,33 @@ addresses) and `SAFE_THRESHOLD` before deploying; `enableModule` then won't run 
 (it needs a threshold of owner signatures collected out of band — see the script's console output
 for what to submit).
 
-**This is the minimum to run the basic single-owner flow.** Each additional feature has its own
-deploy script and its own "Reproducing..." section later in this doc — run whichever you want:
+Deploying plus [funding the Safe](#fund-the-safe) below is the minimum to run the basic flow. Each
+additional feature has its own deploy script and its own "Reproducing..." section later in this
+doc — run whichever you want:
 
 - Price Guard (Chainlink/Supra) → `deploy-oracle-adapters.ts`, see [Reproducing the oracle switch](#reproducing-the-oracle-switch)
 - 2-of-3 owner quorum → `deploy-multisig-rebalance.ts`, see [Reproducing the multisig proof](#reproducing-the-multisig-proof)
 - HCS proposal relay → `create-proposals-topic.ts`, see [Reproducing the HCS topic](#reproducing-the-hcs-topic)
 - On-chain majority rule → `deploy-majority-guard.ts`, see [Reproducing the majority guard](#reproducing-the-majority-guard)
+
+## Fund the Safe
+
+A freshly deployed Safe can't swap yet. On Hedera, an account must be **associated** with a token
+before it can hold it, and the new Safe holds nothing. `demo-rebalance.ts` does the whole setup in
+one run, using the two addresses `deploy.ts` printed:
+
+```bash
+cd packages/contracts
+SAFE_ADDRESS=<from deploy.ts> MODULE_ADDRESS=<from deploy.ts> \
+npx hardhat run scripts/demo-rebalance.ts --network hedera-testnet
+```
+
+It associates your account and the Safe with WHBAR and SAUCE, wraps 5 testnet HBAR into WHBAR,
+moves half of it into the Safe, and swaps half of that to SAUCE through the Safe — so the Safe ends
+up holding both tokens and the app can rebalance in either direction. Your operator account needs
+roughly 10 testnet HBAR for this (5 to wrap, the rest for gas). It signs as the deployer alone, so
+run it on the fresh 1-of-1 Safe, before adding owners. See [Reproducing the
+transaction](#reproducing-the-transaction) for each step.
 
 ## Run the frontend
 
@@ -507,8 +527,9 @@ This script is what produced the transaction above. It, in order:
    Safe is a separate account from the deployer, so it needs its own association).
 4. Transfers half the wrapped WHBAR into the Safe.
 5. Calls `RebalanceModule.rebalance()` through the Safe's own `execTransaction` (the module only
-   accepts calls from the Safe), swapping that WHBAR for SAUCE through the real SaucerSwap V1
-   router.
+   accepts calls from the Safe), swapping half of that WHBAR for SAUCE through the real SaucerSwap
+   V1 router and leaving the rest in the Safe. (The original proof transaction above swapped all
+   of it — 2.5 WHBAR.)
 
 It signs every Safe call as the deployer alone, so it's meant for the fresh 1-of-1 Safe `deploy.ts`
 creates — it stops with an explanation on a multi-owner Safe, where the frontend's quorum flow is
