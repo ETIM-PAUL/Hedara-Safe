@@ -101,6 +101,8 @@ Then fill in `.env`:
 | `NEXT_PUBLIC_PRICE_GUARD_MODULE_ADDRESS` | Printed by `deploy-oracle-adapters.ts` — optional, the Price Guard UI section hides itself if unset |
 | `NEXT_PUBLIC_CHAINLINK_ADAPTER_ADDRESS` / `NEXT_PUBLIC_SUPRA_ADAPTER_ADDRESS` | Also printed by `deploy-oracle-adapters.ts` — only the ones set show up as switch options in the UI |
 | `NEXT_PUBLIC_PROPOSALS_TOPIC_ID` | Printed by `create-proposals-topic.ts` — optional, the Rebalance section falls back to manual copy/paste if unset |
+| `NEXT_PUBLIC_HEDERA_RPC_URL` | Optional — defaults to the same public relay as `HEDERA_TESTNET_RPC_URL`. Lets the frontend read Safe state before a wallet connects |
+| `NEXT_PUBLIC_TOKEN_IN_*` / `NEXT_PUBLIC_TOKEN_OUT_*` | Optional — override which two treasury tokens the dashboard shows. Defaults to the WHBAR/SAUCE pair `demo-rebalance.ts` uses |
 
 ## Deploy contracts to Hedera testnet
 
@@ -117,6 +119,13 @@ external wallet signing. For a real multi-owner Safe, set `SAFE_OWNERS` (comma-s
 addresses) and `SAFE_THRESHOLD` before deploying; `enableModule` then won't run automatically
 (it needs a threshold of owner signatures collected out of band — see the script's console output
 for what to submit).
+
+**This is the minimum to run the basic single-owner flow.** Each additional feature has its own
+deploy script and its own "Reproducing..." section later in this doc — run whichever you want:
+
+- Price Guard (Chainlink/Supra) → `deploy-oracle-adapters.ts`, see [Reproducing the oracle switch](#reproducing-the-oracle-switch)
+- 2-of-3 owner quorum → `deploy-multisig-rebalance.ts`, see [Reproducing the multisig proof](#reproducing-the-multisig-proof)
+- HCS proposal relay → `create-proposals-topic.ts`, see [Reproducing the HCS topic](#reproducing-the-hcs-topic)
 
 ## Run the frontend
 
