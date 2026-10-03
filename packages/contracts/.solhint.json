@@ -4,6 +4,7 @@
     "compiler-version": ["error", "^0.8.24"],
     "func-visibility": ["warn", { "ignoreConstructors": true }],
     "no-unused-vars": "error",
+    "import-path-check": ["warn", ["../../node_modules"]],
     "immutable-vars-naming": "off",
     "gas-custom-errors": "off"
   }
