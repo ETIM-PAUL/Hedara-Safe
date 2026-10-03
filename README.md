@@ -1,7 +1,25 @@
 # hedera-safe-swap
 
-A Gnosis Safe multisig treasury on Hedera, with two Safe modules that rebalance idle treasury
-holdings through [SaucerSwap](https://www.saucerswap.finance/):
+A Gnosis Safe multisig treasury template for Hedera. A 2-of-3 owner quorum rebalances idle
+holdings through [SaucerSwap](https://www.saucerswap.finance/), a permissionless module swaps
+automatically when a live Chainlink or Supra price condition holds, and pending proposals are
+relayed between owners over Hedera's native Consensus Service (HCS) instead of a backend. Every
+claim below is backed by a real Hedera testnet transaction, independently re-confirmed via the
+mirror node — see [Verified testnet transaction](#verified-testnet-transaction).
+
+**Contents:** [What's here](#whats-here) ·
+[Setup](#setup) · [Deploy](#deploy-contracts-to-hedera-testnet) ·
+[Run the frontend](#run-the-frontend) · [Architecture](#architecture) ·
+[Verified testnet transaction](#verified-testnet-transaction) ·
+[Multisig](#multisig-adding-owners-and-quorum-gated-rebalances) ·
+[Proposal relay via HCS](#proposal-relay-via-hcs) ·
+[Off-chain limit orders](#off-chain-limit-orders-were-considered-and-ruled-out) ·
+[Reproducing the transaction](#reproducing-the-transaction) ·
+[Reproducing the oracle switch](#reproducing-the-oracle-switch) ·
+[Reproducing the multisig proof](#reproducing-the-multisig-proof) ·
+[Reproducing the HCS topic](#reproducing-the-hcs-topic)
+
+Two Safe modules do the actual work:
 
 - **`RebalanceModule`** — the Safe's configured signature threshold triggers a swap, any time.
   `rebalance()` only accepts calls from the Safe itself (`msg.sender == address(safe)`) — never a
