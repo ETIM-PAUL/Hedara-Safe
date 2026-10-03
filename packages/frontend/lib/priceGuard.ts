@@ -122,13 +122,13 @@ export async function getPriceGuardState(
   provider: ethers.Provider,
   moduleAddress: string
 ): Promise<PriceGuardState> {
-  const module = new ethers.Contract(moduleAddress, PRICE_GUARD_ABI, provider);
+  const guard = new ethers.Contract(moduleAddress, PRICE_GUARD_ABI, provider);
   const [triggerPrice, triggerExpo, comparison, maxPriceAgeSeconds, oracleAddress] = await Promise.all([
-    module.triggerPrice(),
-    module.triggerExpo(),
-    module.comparison(),
-    module.maxPriceAgeSeconds(),
-    module.oracle()
+    guard.triggerPrice(),
+    guard.triggerExpo(),
+    guard.comparison(),
+    guard.maxPriceAgeSeconds(),
+    guard.oracle()
   ]);
 
   const observed = await getAdapterPrice(provider, oracleAddress);
@@ -169,7 +169,7 @@ export async function triggerPriceGuard(
   amountInHuman: string,
   onStatus: (status: RebalanceStatus) => void
 ): Promise<void> {
-  const module = new ethers.Contract(moduleAddress, PRICE_GUARD_ABI, signer);
+  const guard = new ethers.Contract(moduleAddress, PRICE_GUARD_ABI, signer);
   const amountIn = ethers.parseUnits(amountInHuman, tokenIn.decimals);
   // Same 30-minute window as rebalance.ts, for the same reason — see its DEADLINE_WINDOW_SECONDS
   // comment. A real testnet trigger reverted with DeadlinePassed after a slow wallet confirmation
@@ -182,7 +182,7 @@ export async function triggerPriceGuard(
   let tx: ethers.ContractTransactionResponse;
   try {
     tx = switching
-      ? await module.switchOracleAndTrigger(
+      ? await guard.switchOracleAndTrigger(
           selectedOracleAddress,
           tokenIn.address,
           tokenOut.address,
@@ -192,7 +192,7 @@ export async function triggerPriceGuard(
           [],
           { value: 0 }
         )
-      : await module.trigger(tokenIn.address, tokenOut.address, amountIn, 1n, deadline, [], { value: 0 });
+      : await guard.trigger(tokenIn.address, tokenOut.address, amountIn, 1n, deadline, [], { value: 0 });
   } catch (error) {
     onStatus({ stage: "failed", error: (error as Error).message });
     return;

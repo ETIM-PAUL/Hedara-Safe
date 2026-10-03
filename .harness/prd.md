@@ -10,13 +10,21 @@ build, lint, tests, and the frontend's boot behavior all still hold after any fu
 ## What the template already does
 
 - `packages/contracts/contracts/RebalanceModule.sol` — a Safe module that swaps treasury holdings
-  through SaucerSwap's V1 router (`swapExactTokensForTokens`), gated to Safe owners.
-- Deployed and enabled on Hedera testnet: Safe at `0x487f330a30E6c7101f86e598BE27a5d46C8B3589`,
-  module at `0x27714cc6907e8EB771CCe77159111b19Aa2E9Efe` (see README.md for Hashscan links).
-- A real rebalance (2.5 WHBAR → 1.37386050 SAUCE) executed and mirror-node-verified via
-  `packages/contracts/scripts/demo-rebalance.ts` — also linked in README.md.
-- `packages/frontend` — Next.js dashboard: wallet connect, Safe/treasury reads, and a rebalance
-  trigger with live transaction status.
+  through SaucerSwap's V1 router (`swapExactTokensForTokens`). `rebalance()` is `onlySafe`
+  (`msg.sender == address(safe)`), so it only runs via a quorum-approved Safe `execTransaction`.
+  Current deployment: `0x13642c65E863CdEc489999cf92Ef45c82d9c4Ac4` on Safe
+  `0x487f330a30E6c7101f86e598BE27a5d46C8B3589` (2-of-3).
+- `packages/contracts/contracts/PriceGuardedRebalanceModule.sol` — permissionless `trigger()`,
+  executes only when HBAR/USD meets an owner-set condition. Oracle switchable at runtime between
+  `ChainlinkPriceAdapter` and `SupraPriceAdapter` (`contracts/oracle/`).
+- Real, mirror-node-verified testnet transactions for each path — single-owner rebalance,
+  Chainlink trigger, combined Supra switch+trigger, and a 2-of-3 quorum rebalance (including a
+  deliberate under-quorum attempt that reverts with `GS020`). All linked in README.md.
+- HCS topic `0.0.10808809` relays proposals between owners (`create-proposals-topic.ts`,
+  `packages/frontend/app/api/proposals/route.ts`).
+- `packages/frontend` — Next.js dashboard in three tabs: **SafeSwap** (Safe/treasury reads and
+  quorum-gated rebalance), **MultiSig** (quorum-gated owner add/remove), **Price Guard** (oracle
+  preview, switch, and trigger).
 
 ## Existing app (preserve)
 
@@ -44,6 +52,6 @@ a change done.
 
 1. `npm install` and `npm run build` succeed from a clean state.
 2. `npm run lint` passes with zero errors.
-3. `npm run test --workspace packages/contracts` passes (all 7 existing cases, plus any new ones).
+3. `npm run test --workspace packages/contracts` passes (all 27 existing cases, plus any new ones).
 4. The frontend boots and the home route renders real content — no unset-env-var error text
    visible (see `.harness/validators/playwright-smoke.yaml`).

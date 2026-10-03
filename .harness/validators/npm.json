@@ -31,7 +31,7 @@
       "name": "test",
       "command": "npm run test --workspace packages/contracts",
       "timeoutMs": 180000,
-      "purpose": "Run the RebalanceModule test suite."
+      "purpose": "Run the contract test suite (both modules and both oracle adapters)."
     }
   ]
 }

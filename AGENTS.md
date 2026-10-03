@@ -11,7 +11,7 @@ A Gnosis Safe multisig on Hedera, extended with two Safe modules:
   from any single owner's own account, however many owners exist or whatever the threshold is set
   to. The only way to call it is a Safe `execTransaction` targeting the module, which already
   means the Safe's configured signature threshold was met. See [Multisig: adding owners and
-  quorum-gated rebalances](../README.md#multisig-adding-owners-and-quorum-gated-rebalances) in the
+  quorum-gated rebalances](README.md#multisig-adding-owners-and-quorum-gated-rebalances) in the
   README for the full mechanics (owner growth, proposal sharing, signature aggregation) — this is
   a deliberate divergence from `PriceGuardedRebalanceModule`'s owner/permissionless gating, not an
   oversight; see why below.
@@ -147,6 +147,17 @@ something to refactor.
   (not `process.env[name]`) — Next.js can only inline a dynamic lookup like that on the server,
   not into the browser bundle, so it silently becomes `undefined` client-side. This bit us once;
   don't reintroduce it.
+- `packages/frontend/app/page.tsx` — presentation only, split into three tabs under the connect
+  row: **SafeSwap** (Safe info, holdings, rebalance), **MultiSig** (owner add/remove), and
+  **Price Guard** (rendered only when `NEXT_PUBLIC_PRICE_GUARD_MODULE_ADDRESS` is set). Tabs only
+  switch what's rendered; every hook (`useMultisigRebalance` ×2, `usePriceGuard`) is called
+  unconditionally at the top of the component, so a pending proposal in one tab survives
+  switching to another. Don't move a hook inside a tab's conditional block. `ProposalCard`,
+  `RecentProposalsCard`, and `PasteProposalBox` are shared by both quorum tabs; add a new
+  proposal kind's UI by passing a different `summary`, not by copying the card.
+- `packages/frontend/.eslintrc.json` — `next/core-web-vitals`. Without it, `next lint` drops into
+  an interactive setup prompt and exits non-zero, which fails `npm run lint` on any fresh
+  scaffold. Keep it committed.
 - `packages/frontend/next.config.mjs` — loads the monorepo-root `.env` via `dotenv`, since Next
   only auto-loads `.env` files from its own package directory. Required for `NEXT_PUBLIC_*` vars
   to reach the client bundle at all. The same `dotenv.config()` call is also what makes

@@ -394,7 +394,9 @@ export default function Home() {
   const [quoteError, setQuoteError] = useState<string | null>(null);
   const [quoteLoading, setQuoteLoading] = useState(false);
   const [newOwnerAddress, setNewOwnerAddress] = useState("");
-  const [newOwnerThreshold, setNewOwnerThreshold] = useState("1");
+  // null = follow the Safe's live threshold. A hardcoded default would silently lower the quorum
+  // (e.g. 2-of-3 → 1-of-4) for any proposer who doesn't touch the field.
+  const [newOwnerThreshold, setNewOwnerThreshold] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"safeswap" | "multisig" | "priceguard">("safeswap");
 
   function showToast(message: string) {
@@ -584,7 +586,7 @@ export default function Home() {
       showToast("That address is already an owner.");
       return;
     }
-    const nextThreshold = Number(newOwnerThreshold);
+    const nextThreshold = Number(newOwnerThreshold ?? safeState.threshold);
     if (!Number.isInteger(nextThreshold) || nextThreshold < 1 || nextThreshold > safeState.owners.length + 1) {
       showToast(`Threshold must be between 1 and ${safeState.owners.length + 1}.`);
       return;
@@ -593,6 +595,7 @@ export default function Home() {
     const built = await buildAddOwnerProposal(provider, newOwnerAddress, nextThreshold);
     await ownersProposal.propose(signer, built);
     setNewOwnerAddress("");
+    setNewOwnerThreshold(null);
   }
 
   /** Proposes removing `ownerToRemove`, auto-shrinking the threshold to fit the remaining owner
@@ -849,7 +852,7 @@ export default function Home() {
                     type="number"
                     min="1"
                     max={safeState.owners.length + 1}
-                    value={newOwnerThreshold}
+                    value={newOwnerThreshold ?? String(safeState.threshold)}
                     onChange={(e) => setNewOwnerThreshold(e.target.value)}
                     disabled={ownersProposal.isRunning}
                   />

@@ -54,12 +54,12 @@ adapter has no condition to gate on — it'd just be `RebalanceModule` again, ba
 - `packages/contracts/contracts/mocks/` — test doubles (`MockSafe`, `MockERC20`,
   `MockSaucerSwapRouter`, `MockOracleAdapter`, `MockChainlinkAggregator`, `MockSupraStorage`) used
   only by the test suite, not deployed.
-- `packages/contracts/scripts/deploy.ts` — the real deploy sequence for `RebalanceModule` (Phase 4).
+- `packages/contracts/scripts/deploy.ts` — the real deploy sequence: Safe, `SafeProxyFactory`, `RebalanceModule`, enable module.
 - `packages/contracts/scripts/deploy-oracle-adapters.ts` — deploys both oracle adapters and the
   `PriceGuardedRebalanceModule`, enables it, fires a plain `trigger()` via Chainlink, then a
   combined `switchOracleAndTrigger()` to Supra in one signed call — see the proof below.
 - `packages/contracts/scripts/demo-rebalance.ts` — seeds the deployed Safe and triggers a real
-  swap through `RebalanceModule` (Phase 7 — produced the transaction below).
+  swap through `RebalanceModule` (produced the transaction below).
 - `packages/contracts/scripts/deploy-multisig-rebalance.ts` — deploys a fresh `RebalanceModule`,
   grows the Safe from 1 to 3 owners, raises the threshold to 2-of-3, and proves a real
   quorum-gated rebalance (including a deliberate premature-execution attempt that must revert) —
@@ -102,11 +102,20 @@ Then fill in `.env`:
 | `NEXT_PUBLIC_SAFE_ADDRESS`  | Printed by `deploy.ts` below — leave blank until you've deployed                                                                                                                                                                    |
 | `NEXT_PUBLIC_MODULE_ADDRESS` | Also printed by `deploy.ts` — the `RebalanceModule` address. If you also run `deploy-multisig-rebalance.ts`, update this to the address it prints — that script deploys a new module instance |
 | `OWNER2_ADDRESS` / `OWNER2_KEY` / `OWNER3_ADDRESS` | Only needed for `deploy-multisig-rebalance.ts` — two throwaway testnet EVM accounts (funded with a little HBAR) that become the Safe's 2nd and 3rd owners for the quorum proof |
-| `NEXT_PUBLIC_PRICE_GUARD_MODULE_ADDRESS` | Printed by `deploy-oracle-adapters.ts` — optional, the Price Guard UI section hides itself if unset |
+| `NEXT_PUBLIC_PRICE_GUARD_MODULE_ADDRESS` | Printed by `deploy-oracle-adapters.ts` — optional, the **Price Guard** tab is hidden if unset |
 | `NEXT_PUBLIC_CHAINLINK_ADAPTER_ADDRESS` / `NEXT_PUBLIC_SUPRA_ADAPTER_ADDRESS` | Also printed by `deploy-oracle-adapters.ts` — only the ones set show up as switch options in the UI |
-| `NEXT_PUBLIC_PROPOSALS_TOPIC_ID` | Printed by `create-proposals-topic.ts` — optional, the Rebalance section falls back to manual copy/paste if unset |
+| `NEXT_PUBLIC_PROPOSALS_TOPIC_ID` | Printed by `create-proposals-topic.ts` — optional, both the SafeSwap and MultiSig tabs fall back to manual copy/paste if unset |
 | `NEXT_PUBLIC_HEDERA_RPC_URL` | Optional — defaults to the same public relay as `HEDERA_TESTNET_RPC_URL`. Lets the frontend read Safe state before a wallet connects |
 | `NEXT_PUBLIC_TOKEN_IN_*` / `NEXT_PUBLIC_TOKEN_OUT_*` | Optional — override which two treasury tokens the dashboard shows. Defaults to the WHBAR/SAUCE pair `demo-rebalance.ts` uses |
+
+Check the toolchain before deploying anything. None of these need a funded account or a filled-in
+`.env`:
+
+```bash
+npm run lint   # solhint (contracts) + next lint (frontend)
+npm test       # contract test suite — local Hardhat network, no testnet
+npm run build  # compiles contracts, then builds the frontend
+```
 
 ## Deploy contracts to Hedera testnet
 
@@ -154,9 +163,10 @@ row:
   to share** button and a paste box are still there as a fallback if the topic isn't configured or
   publishing fails). Once enough approvals exist, anyone can hit **Execute now**. See [Proposal
   relay via HCS](#proposal-relay-via-hcs) for how this works.
-- **MultiSig** — owner management: every current owner listed with a **Remove** button (disabled
-  if you're not an owner, or would remove the Safe's last owner), and an **Add owner** form (an
-  address field plus an editable **New threshold**, defaulting to the current one). Both go
+- **MultiSig** — owner management: every current owner listed with a **Remove** button (shown
+  only to owners, and only while the Safe has more than one owner), and an **Add owner** form (an
+  address field plus an editable **New threshold**, which tracks the Safe's current threshold until you change it, so
+  adding an owner never lowers the quorum by accident). Both go
   through the exact same propose/approve/execute quorum flow as a rebalance above — adding or
   removing an owner is a real Safe `execTransaction` (`addOwnerWithThreshold`/`removeOwner`, both
   `SelfAuthorized`), not a single click that bypasses the threshold — including its own "Proposals
@@ -260,14 +270,14 @@ adapter normalizes this itself, not the module.
 
 ## Verified testnet transaction
 
-Safe deployment (Phase 4) — module enabled on the Safe:
+Safe deployment — module enabled on the Safe:
 
 - Safe: [`0x487f330a30E6c7101f86e598BE27a5d46C8B3589`](https://hashscan.io/testnet/contract/0x487f330a30E6c7101f86e598BE27a5d46C8B3589)
 - RebalanceModule: [`0x27714cc6907e8EB771CCe77159111b19Aa2E9Efe`](https://hashscan.io/testnet/contract/0x27714cc6907e8EB771CCe77159111b19Aa2E9Efe)
 - `enableModule` tx: [`0x7054822d2f421fc441d9bfeec9d7bd4bda2c5aeb5a3e337bc200ad4bf8c45678`](https://hashscan.io/testnet/transaction/0x7054822d2f421fc441d9bfeec9d7bd4bda2c5aeb5a3e337bc200ad4bf8c45678)
 - Mirror node: `GET https://testnet.mirrornode.hedera.com/api/v1/contracts/results/0x7054822d2f421fc441d9bfeec9d7bd4bda2c5aeb5a3e337bc200ad4bf8c45678` → `status: 0x1` (SUCCESS)
 
-Rebalance (Phase 7) — a real swap executed through the module against SaucerSwap's live V1
+Rebalance — a real swap executed through the module against SaucerSwap's live V1
 router, converting the Safe's WHBAR into SAUCE:
 
 - Rebalance tx: [`0x432d5e6bf726905b5e108d84f6e06df836473b8f80f3d061b777c93f039f322e`](https://hashscan.io/testnet/transaction/0x432d5e6bf726905b5e108d84f6e06df836473b8f80f3d061b777c93f039f322e)

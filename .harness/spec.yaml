@@ -3,8 +3,9 @@ schemaVersion: 2
 name: safe-treasury-rebalance
 description: >
   Regression recipe for the finished hedera-safe-swap template: a Safe
-  multisig treasury on Hedera with a RebalanceModule that swaps holdings
-  through SaucerSwap's live V1 router. Validates that the deployed contracts,
+  multisig treasury on Hedera with a quorum-gated RebalanceModule (SaucerSwap
+  V1), a Chainlink/Supra price-guarded module, and HCS-relayed proposals.
+  Validates that the deployed contracts,
   test suite, and frontend dashboard all still work — install, build, lint,
   test, and a Playwright boot check of the real UI.
 
