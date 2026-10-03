@@ -7,6 +7,13 @@ relayed between owners over Hedera's native Consensus Service (HCS) instead of a
 claim below is backed by a real Hedera testnet transaction, independently re-confirmed via the
 mirror node — see [Verified testnet transaction](#verified-testnet-transaction).
 
+| SafeSwap | MultiSig | Price Guard |
+| :---: | :---: | :---: |
+| <img src="docs/screenshots/safeswap.png" alt="SafeSwap tab: the 2-of-3 Safe's owners, WHBAR/SAUCE holdings, and a rebalance form with a live SaucerSwap quote and slippage control" width="260"> | <img src="docs/screenshots/multisig.png" alt="MultiSig tab: three owners with Remove buttons, an add-owner form with the new threshold, and owner-change proposals fetched from the HCS topic" width="260"> | <img src="docs/screenshots/priceguard.png" alt="Price Guard tab: Chainlink active, HBAR/USD condition at or below $0.10, an oracle picker, and the observed price with condition status" width="260"> |
+
+_Live testnet state, viewed as one of the Safe's three owners. Each tab is described under
+[Run the frontend](#run-the-frontend)._
+
 **Contents:** [What's here](#whats-here) ·
 [Setup](#setup) · [Deploy](#deploy-contracts-to-hedera-testnet) ·
 [Run the frontend](#run-the-frontend) · [Architecture](#architecture) ·
