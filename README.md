@@ -67,10 +67,13 @@ adapter has no condition to gate on — it'd just be `RebalanceModule` again, ba
 - `packages/contracts/scripts/create-proposals-topic.ts` — creates the HCS topic rebalance
   proposals get published to — see [Proposal relay via
   HCS](#proposal-relay-via-hcs) below.
-- `packages/frontend` — Next.js app: wallet connect, a read-only Safe/treasury ledger, an
-  owner-management flow, a quorum-gated rebalance flow (`lib/multisig.ts` +
-  `lib/useMultisigRebalance.ts`, with proposals relayed via HCS — `lib/hcs.ts` +
-  `app/api/proposals/route.ts`), and a price-guard section (`lib/usePriceGuard.ts`), all reading
+- `packages/frontend` — Next.js app, organized into three tabs (**SafeSwap**, **MultiSig**, **Price
+  Guard**): a read-only Safe/treasury ledger and quorum-gated rebalance flow, an owner
+  add/remove flow that goes through the identical quorum machinery, and a price-guard section.
+  Both quorum flows (`lib/multisig.ts` + `lib/useMultisigRebalance.ts`) share one generalized
+  propose/approve/execute system — a `SafeProposal` tagged by `kind` (`"rebalance"`, `"addOwner"`,
+  or `"removeOwner"`) — with proposals relayed via HCS (`lib/hcs.ts` +
+  `app/api/proposals/route.ts`) and a price-guard section (`lib/usePriceGuard.ts`), all reading
   the real deployed contracts.
 
 ## Prerequisites
@@ -136,37 +139,48 @@ npm run dev
 
 Open http://localhost:3000. Connect any EIP-1193 wallet (MetaMask, HashPack, or Blade in EVM
 mode — Hedera testnet is a standard EVM chain, so no HashConnect SDK is needed) and it prompts to
-add/switch to Hedera testnet automatically. Once connected, the page reads the Safe's owners,
-threshold, module status, and live treasury balances. If the Safe is still 1-of-N and you're an
-owner, an **Add owner** field lets you grow it toward 3 owners (see
-[Multisig](#multisig-adding-owners-and-quorum-gated-rebalances) below). It also gives you two ways
-to move funds:
+add/switch to Hedera testnet automatically. The page is organized into tabs, under the connect
+row:
 
-- **Rebalance** — requires the Safe's full signature threshold, either direction (a toggle flips
-  `tokenIn`/`tokenOut`), with a live SaucerSwap quote and a slippage % control that computes a real
-  `amountOutMin`. **Propose rebalance** builds the exact Safe transaction and casts your own
-  approval. Approving and executing are always two separate, explicit actions — even on a 1-of-N
-  Safe where your own approval already meets the threshold, nothing moves until you separately
-  click **Execute now**, so one wallet confirmation never silently becomes two. The proposal gets
-  published to an HCS topic automatically, so the other owners see it listed under "Proposals from
-  other owners" and just click **Load** — no copy/paste needed (a **Copy proposal to share** button
-  and a paste box are still there as a fallback if the topic isn't configured or publishing fails).
-  Once enough approvals exist, anyone can hit **Execute now**. See [Proposal relay via
-  HCS](#proposal-relay-via-hcs) for how this works.
-- **Price Guard** — shows `PriceGuardedRebalanceModule`'s configured trigger condition (labeled
-  `Condition (HBAR/USD)` — it's explicitly not a SAUCE price condition; WHBAR is Hedera's native
-  token 1:1 wrapped, so its dollar value tracks HBAR/USD directly, which is what actually gates
-  the swap even though the swap itself moves WHBAR/SAUCE), a direction toggle just like Rebalance,
-  and Safe owners get a **Trigger with** picker (Chainlink, Supra, whichever adapters are
-  configured) right next to the amount field. Picking a different oracle previews its live price
-  and whether the condition would hold for it *before* you commit to anything. If the picked
-  oracle isn't already active, one click both switches to it and fires the trigger in a single
-  signed transaction (`switchOracleAndTrigger`) — no separate "switch" step. The button stays
-  disabled until the selected oracle's condition actually holds.
+- **SafeSwap** — the Safe's address, owners, threshold, module status, live treasury balances, and
+  the rebalance flow: requires the Safe's full signature threshold, either direction (a toggle
+  flips `tokenIn`/`tokenOut`), with a live SaucerSwap quote and a slippage % control that computes
+  a real `amountOutMin`. **Propose rebalance** builds the exact Safe transaction and casts your
+  own approval. Approving and executing are always two separate, explicit actions — even on a
+  1-of-N Safe where your own approval already meets the threshold, nothing moves until you
+  separately click **Execute now**, so one wallet confirmation never silently becomes two. The
+  proposal gets published to an HCS topic automatically, so the other owners see it listed under
+  "Proposals from other owners" and just click **Load** — no copy/paste needed (a **Copy proposal
+  to share** button and a paste box are still there as a fallback if the topic isn't configured or
+  publishing fails). Once enough approvals exist, anyone can hit **Execute now**. See [Proposal
+  relay via HCS](#proposal-relay-via-hcs) for how this works.
+- **MultiSig** — owner management: every current owner listed with a **Remove** button (disabled
+  if you're not an owner, or would remove the Safe's last owner), and an **Add owner** form (an
+  address field plus an editable **New threshold**, defaulting to the current one). Both go
+  through the exact same propose/approve/execute quorum flow as a rebalance above — adding or
+  removing an owner is a real Safe `execTransaction` (`addOwnerWithThreshold`/`removeOwner`, both
+  `SelfAuthorized`), not a single click that bypasses the threshold — including its own "Proposals
+  from other owners" list and paste fallback over the same HCS topic, filtered to only
+  owner-management proposals so it never mixes with a pending rebalance. Removing an owner
+  auto-computes the new threshold (`min(currentThreshold, remainingOwners)`) rather than exposing
+  another input, since that constraint is mechanical; adding one leaves the threshold as a real
+  choice the proposer sets explicitly. See
+  [Multisig](#multisig-adding-owners-and-quorum-gated-rebalances) below for why owner changes need
+  quorum at all.
+- **Price Guard** (only shown if `NEXT_PUBLIC_PRICE_GUARD_MODULE_ADDRESS` is set) — shows
+  `PriceGuardedRebalanceModule`'s configured trigger condition (labeled `Condition (HBAR/USD)` —
+  it's explicitly not a SAUCE price condition; WHBAR is Hedera's native token 1:1 wrapped, so its
+  dollar value tracks HBAR/USD directly, which is what actually gates the swap even though the
+  swap itself moves WHBAR/SAUCE), a direction toggle just like Rebalance, and Safe owners get a
+  **Trigger with** picker (Chainlink, Supra, whichever adapters are configured) right next to the
+  amount field. Picking a different oracle previews its live price and whether the condition would
+  hold for it *before* you commit to anything. If the picked oracle isn't already active, one
+  click both switches to it and fires the trigger in a single signed transaction
+  (`switchOracleAndTrigger`) — no separate "switch" step. The button stays disabled until the
+  selected oracle's condition actually holds.
 
-Both share a step tracker (submitted → pending → mirror node → confirmed) and a direct Hashscan
-link on success. The Price Guard section only renders if `NEXT_PUBLIC_PRICE_GUARD_MODULE_ADDRESS`
-is set — it's optional.
+Every quorum-gated or triggered action shares a step tracker (submitted → pending → mirror node →
+confirmed) and a direct Hashscan link on success.
 
 ## Architecture
 
@@ -310,16 +324,24 @@ multi-owner custody. Two pieces make that real here: growing the owner set, and 
 `RebalanceModule.rebalance()` actually require the resulting threshold rather than letting any one
 owner bypass it.
 
-**Growing from 1 to 3 owners.** `Safe.addOwnerWithThreshold(owner, threshold)` is
-`SelfAuthorized` — callable only via the Safe's own `execTransaction`, never directly. While the
-Safe is still 1-of-N, a single owner can submit that `execTransaction` alone using the "approved
-hash" signature scheme (`v=1, r=owner, s=0`, valid whenever `msg.sender == owner` — no real ECDSA
-signing needed; see `packages/frontend/lib/multisig.ts`'s `addOwner()`). Going from 1 to 3 owners
-is two such calls: the first adds owner 2 and keeps the threshold at 1 (so owner 1 can still act
-alone for the second call); the second adds owner 3 and raises the threshold to 2 in the same
-call — the new threshold only takes effect once that call has already executed, so both additions
-stay a single click for owner 1. The frontend's **Add owner** field in the Safe section computes
-which of these two calls applies automatically from the current owner count.
+**Growing (or shrinking) the owner set.** `Safe.addOwnerWithThreshold(owner, threshold)` and
+`Safe.removeOwner(prevOwner, owner, threshold)` are both `SelfAuthorized` — callable only via the
+Safe's own `execTransaction`, never directly from an owner's wallet. The frontend's **MultiSig**
+tab builds either call through the exact same propose/approve/execute machinery as a rebalance
+(`buildAddOwnerProposal`/`buildRemoveOwnerProposal` in `packages/frontend/lib/multisig.ts`, sharing
+the generalized `SafeProposal`/`ProposalKind` system both flows are built on) — not a separate,
+simpler path. At threshold 1 this still means an explicit propose-then-approve-then-execute
+sequence for that one owner (collapsing into effectively one flow, since there's only one owner to
+satisfy); once the Safe is above 1-of-N, a genuinely different owner has to approve before
+**Execute now** does anything, using the same "approved hash" scheme described below.
+`removeOwner` additionally needs `prevOwner` — the owner immediately before the target in the
+Safe's internal linked list (`getOwners()` returns owners in that same order, so `owners[i - 1]`,
+or the sentinel `0x1` for index 0, is always correct) — which the frontend computes for you rather
+than asking the proposer to know the Safe's internal ordering. Going from the demo's 1-of-1 Safe
+to a real 3-owner, 2-of-3 quorum this way is two add-owner proposals: the first adds owner 2 and
+can set the threshold to 1 or 2; the second adds owner 3 and sets the final threshold — the new
+threshold only takes effect once that proposal has already executed, so it's always safe to choose
+up front.
 
 **Why `rebalance()` needed to change, not just the owner count.** Before this, `rebalance()` was
 `onlySafeOwner` — it checked `safe.isOwner(msg.sender)` directly, meaning *any single owner* could
@@ -334,17 +356,21 @@ calls it, so requiring a quorum there would add friction without adding safety.
 **No backend to relay signatures, so proposals travel as a copyable blob.** Safe's own
 `approveHash(bytes32)` lets each owner record their approval on-chain from their own wallet/session
 — no coordination server needed. What's missing is a way for owner 2 to know *which* transaction
-owner 1 wants approved: the frontend's **Propose rebalance** button builds the exact
-`(to, data, nonce)` tuple, gets owner 1's approval, and offers a **Copy proposal to share** button
-(a base64 blob of those three fields — nothing recomputed from a live quote, so every owner
-reviews and approves bit-for-bit the same transaction). Owner 2 pastes it into **Load proposal**,
-which decodes the raw calldata back into a human-readable summary (token amounts, deadline) before
-they approve. Approving never auto-executes, even when that approval happens to meet the
+owner 1 wants approved: proposing (whether a rebalance, an add-owner, or a remove-owner — same
+mechanism, different `kind`) builds the exact `(to, data, nonce)` tuple, gets owner 1's approval,
+and offers a **Copy proposal to share** button (a base64 blob of those fields — nothing recomputed
+from a live quote, so every owner reviews and approves bit-for-bit the same transaction). Owner 2
+pastes it into **Load proposal**, which decodes the raw calldata back into a human-readable
+summary (token amounts and deadline for a rebalance; the target address and new threshold for an
+owner change) before they approve — and refuses to load a proposal of the wrong kind for whichever
+tab it was pasted into, so an owner-management blob can't accidentally get treated as a rebalance
+or vice versa. Approving never auto-executes, even when that approval happens to meet the
 threshold — an **Execute now** button (enabled only once enough approvals exist) submits
 `execTransaction` as its own explicit step, using every approving owner's on-chain-recorded
 `approvedHashes` entry as their signature (aggregated and sorted by address, per
 `Safe.checkNSignatures`). Keeping "approve" and "execute" as two separate actions means a wallet
-confirmation for the former never silently becomes a second confirmation moving real funds.
+confirmation for the former never silently becomes a second confirmation moving real funds or
+changing who controls the Safe.
 
 **Verified on real testnet:** `packages/contracts/scripts/deploy-multisig-rebalance.ts` deploys a
 fresh `RebalanceModule` (required — the old deployed one still has `onlySafeOwner` bytecode and
@@ -515,8 +541,9 @@ EVM/JSON-RPC equivalent, so this is the one script in the repo that can't go thr
 Solidity/Hardhat side at all. Creates an open topic (no submit key) with
 `HEDERA_OPERATOR_ID`/`HEDERA_OPERATOR_KEY` from `.env` — the same operator used everywhere else in
 this repo, no new credential needed. Copy the printed ID into `.env` as
-`NEXT_PUBLIC_PROPOSALS_TOPIC_ID` to see the "Proposals from other owners" list appear in the
-Rebalance section.
+`NEXT_PUBLIC_PROPOSALS_TOPIC_ID` to see the "Proposals from other owners" list appear in both the
+SafeSwap tab (rebalance proposals) and the MultiSig tab (owner add/remove proposals) — one shared
+topic, each tab filtering to the proposal kinds it cares about.
 
 ## License
 

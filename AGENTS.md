@@ -103,16 +103,33 @@ something to refactor.
   add/switch), `safe.ts` (Safe/treasury reads — kept read-only by convention; anything that sends
   a Safe transaction lives in `multisig.ts` instead), `rebalance.ts` (SaucerSwap quote/slippage
   helpers only now — `RebalanceModule`'s old single-owner trigger function was removed from here
-  when `rebalance()` became Safe-only; see `multisig.ts`), `multisig.ts` (owner management —
-  `addOwner()` — and the propose/approve/execute machinery for quorum-gated rebalances: builds the
-  exact Safe transaction, gets owners' `approveHash()` on-chain, aggregates their approved-hash
-  signatures once threshold is met, and submits `execTransaction`; see the README's "Multisig"
-  section for why this exists and how proposals travel between owners without a backend),
-  `useMultisigRebalance.ts` (the hook the Rebalance section's UI state machine is built from —
-  building/loading a proposal, tracking approvals, executing. Approving and executing are always
-  two separate calls, even when an approval happens to meet the threshold — don't reintroduce
-  auto-chaining approve straight into execute; a wallet confirmation for "approve" should never
-  silently become a second confirmation that moves treasury funds), `hcs.ts` (reads: plain mirror
+  when `rebalance()` became Safe-only; see `multisig.ts`), `multisig.ts` (the generalized
+  propose/approve/execute machinery every quorum-gated Safe action goes through — a rebalance
+  and an owner add/remove alike. A `SafeProposal` is tagged with a `kind`
+  (`"rebalance" | "addOwner" | "removeOwner"`); `buildRebalanceProposal()`,
+  `buildAddOwnerProposal()`, and `buildRemoveOwnerProposal()` each build the exact `(to, data,
+  nonce)` tuple for their kind — `buildRemoveOwnerProposal()` additionally computes `prevOwner`
+  from the Safe's current owner list, since `Safe.removeOwner` needs the owner immediately before
+  the target in its internal linked list (`getOwners()`'s order, so `owners[i - 1]`, or the
+  sentinel `0x1` for index 0). From there every kind shares the same `getApprovals()`,
+  `approveProposal()`, and `executeProposal()`, which get owners' `approveHash()` on-chain,
+  aggregate their approved-hash signatures once threshold is met, and submit `execTransaction`;
+  see the README's "Multisig" section for why this exists and how proposals travel between owners
+  without a backend. There is no standalone single-owner `addOwner()` anymore; growing or
+  shrinking the owner set always goes through this same propose/approve/execute path, even at
+  threshold 1. Don't add a fourth proposal kind here without also deciding deliberately whether it
+  needs `onlySafe`-style quorum gating at all — see "Conventions" below),
+  `useMultisigRebalance.ts` (the hook each proposal-kind section's UI state machine is built
+  from — building/loading a proposal, tracking approvals, executing. Takes a `relevantKinds:
+  ProposalKind[]` so the frontend can run two independent instances off the same hook — one for
+  the SafeSwap tab's rebalance proposals, one for the MultiSig tab's owner add/remove proposals —
+  each with its own pending-proposal state, filtering the shared HCS topic to only the kinds it
+  cares about. `propose()` takes an already-built `SafeProposal` (call one of the `build*Proposal`
+  functions above first) rather than raw parameters, so it doesn't need to know which kind it's
+  handling. Approving and executing are always two separate calls, even when an approval happens
+  to meet the threshold — don't reintroduce auto-chaining approve straight into execute; a wallet
+  confirmation for "approve" should never silently become a second confirmation that moves
+  treasury funds or changes who controls the Safe), `hcs.ts` (reads: plain mirror
   node fetches, public, no key. Writes: POSTs to `app/api/proposals/route.ts`, since there's no way
   to submit an HCS message from a browser wallet — see "Proposal relay via HCS" in the README for
   why, including why this isn't available as a Solidity precompile today despite HTS having one),
