@@ -128,6 +128,8 @@ export function useMultisigRebalance(params: {
         }
       }
       setRecentProposals(previews);
+    } catch {
+      setToast("Couldn't reach the mirror node to load proposals — try Refresh in a moment.");
     } finally {
       setRecentProposalsLoading(false);
     }

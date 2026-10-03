@@ -181,7 +181,9 @@ row:
   owner-management proposals so it never mixes with a pending rebalance. Removing an owner
   auto-computes the new threshold (`min(currentThreshold, remainingOwners)`) rather than exposing
   another input, since that constraint is mechanical; adding one leaves the threshold as a real
-  choice the proposer sets explicitly. See
+  choice the proposer sets explicitly. A newly added owner needs some testnet HBAR before it can
+  approve or execute anything — on Hedera an EVM address only becomes an account when it first
+  receives HBAR — and the app says so instead of failing with a raw gas-estimation error. See
   [Multisig](#multisig-adding-owners-and-quorum-gated-rebalances) below for why owner changes need
   quorum at all.
 - **Price Guard** (only shown if `NEXT_PUBLIC_PRICE_GUARD_MODULE_ADDRESS` is set) — shows

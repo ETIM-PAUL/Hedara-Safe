@@ -1,4 +1,17 @@
-import { BrowserProvider } from "ethers";
+import { BrowserProvider, type Signer } from "ethers";
+
+/** On Hedera an EVM address isn't an account until it first receives HBAR — until then every
+ * transaction it sends dies at gas estimation with an opaque "missing revert data" error. A
+ * freshly added Safe owner hits this immediately, so fail early with an actionable message. */
+export async function assertCanPayGas(signer: Signer): Promise<void> {
+  if (!signer.provider) return;
+  const address = await signer.getAddress();
+  if ((await signer.provider.getBalance(address)) === 0n) {
+    throw new Error(
+      `${address} has no HBAR to pay gas. Send it some testnet HBAR first — Hedera creates the account on its first incoming transfer.`
+    );
+  }
+}
 
 /**
  * Hedera testnet is a standard EVM JSON-RPC chain, so any EIP-1193 wallet works here —

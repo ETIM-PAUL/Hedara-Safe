@@ -20,17 +20,21 @@ export async function waitForMirrorNode(
   delayMs = 2000
 ): Promise<void> {
   for (let i = 0; i < attempts; i++) {
-    const response = await fetch(`${MIRROR_NODE_BASE}/api/v1/contracts/results/${txHash}`);
-    if (response.ok) {
-      const data = await response.json();
-      if (data.result === "SUCCESS") {
-        onStatus({ stage: "confirmed", txHash });
-        return;
+    try {
+      const response = await fetch(`${MIRROR_NODE_BASE}/api/v1/contracts/results/${txHash}`);
+      if (response.ok) {
+        const data = await response.json();
+        if (data.result === "SUCCESS") {
+          onStatus({ stage: "confirmed", txHash });
+          return;
+        }
+        if (data.result && data.result !== "SUCCESS") {
+          onStatus({ stage: "failed", txHash, error: data.result });
+          return;
+        }
       }
-      if (data.result && data.result !== "SUCCESS") {
-        onStatus({ stage: "failed", txHash, error: data.result });
-        return;
-      }
+    } catch {
+      // Network blip — the tx already succeeded per the RPC receipt; just poll again.
     }
     await new Promise((resolve) => setTimeout(resolve, delayMs));
   }

@@ -1,6 +1,7 @@
 import { ethers } from "ethers";
 import { getSafeAddress, getModuleAddress } from "./safe";
 import { waitForMirrorNode, type RebalanceStatus } from "./txStatus";
+import { assertCanPayGas } from "./wallet";
 
 /**
  * Quorum-gated Safe proposals — generic over *which* Safe transaction is being proposed, not just
@@ -216,7 +217,10 @@ export async function approveProposal(
   onStatus: (status: RebalanceStatus) => void
 ): Promise<void> {
   const safe = safeContract(signer);
-  await runSafeTx(() => safe.approveHash(hash), onStatus);
+  await runSafeTx(async () => {
+    await assertCanPayGas(signer);
+    return safe.approveHash(hash);
+  }, onStatus);
 }
 
 /** Submits the proposal's action (rebalance or owner add/remove) once enough owners have
@@ -231,22 +235,21 @@ export async function executeProposal(
   const safe = safeContract(signer);
   const signatures = buildApprovedHashSignatures(approvedOwners);
 
-  return runSafeTx(
-    () =>
-      safe.execTransaction(
-        proposal.to,
-        0,
-        proposal.data,
-        0,
-        0,
-        0,
-        0,
-        ethers.ZeroAddress,
-        ethers.ZeroAddress,
-        signatures
-      ),
-    onStatus
-  );
+  return runSafeTx(async () => {
+    await assertCanPayGas(signer);
+    return safe.execTransaction(
+      proposal.to,
+      0,
+      proposal.data,
+      0,
+      0,
+      0,
+      0,
+      ethers.ZeroAddress,
+      ethers.ZeroAddress,
+      signatures
+    );
+  }, onStatus);
 }
 
 export type DecodedAction =

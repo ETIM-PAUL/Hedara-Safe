@@ -42,7 +42,10 @@ interface MirrorTopicMessage {
   consensus_timestamp: string;
 }
 
-/** Most recent proposals published to the topic, newest first. Each message's `message` field is
+/** Throws if the mirror node can't be reached or errors, so callers can tell "couldn't check"
+ * apart from "nothing published".
+ *
+ * Most recent proposals published to the topic, newest first. Each message's `message` field is
  * mirror node's own base64 wrapper around whatever bytes were submitted — one unwrap (atob) gets
  * back the same base64 blob `encodeProposal()`/`decodeProposal()` in multisig.ts already speak,
  * so nothing downstream needs to know these came from HCS rather than a pasted blob. */
@@ -53,7 +56,7 @@ export async function fetchRecentProposals(limit = 10): Promise<TopicProposal[]>
   const response = await fetch(
     `${MIRROR_NODE_BASE}/api/v1/topics/${topicId}/messages?order=desc&limit=${limit}`
   );
-  if (!response.ok) return [];
+  if (!response.ok) throw new Error(`Mirror node returned ${response.status}`);
 
   const data = (await response.json()) as { messages?: MirrorTopicMessage[] };
   return (data.messages ?? []).map((m) => ({

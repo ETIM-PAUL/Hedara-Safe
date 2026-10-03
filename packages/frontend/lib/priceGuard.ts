@@ -2,6 +2,7 @@ import { ethers } from "ethers";
 import { type TreasuryToken } from "./safe";
 import { waitForMirrorNode, type RebalanceStatus } from "./txStatus";
 import { shortenAddress } from "./format";
+import { assertCanPayGas } from "./wallet";
 
 const PRICE_GUARD_ABI = [
   "function trigger(address tokenIn, address tokenOut, uint256 amountIn, uint256 amountOutMin, uint256 deadline, bytes[] calldata updateData) payable returns (uint256)",
@@ -181,6 +182,7 @@ export async function triggerPriceGuard(
 
   let tx: ethers.ContractTransactionResponse;
   try {
+    await assertCanPayGas(signer);
     tx = switching
       ? await guard.switchOracleAndTrigger(
           selectedOracleAddress,
