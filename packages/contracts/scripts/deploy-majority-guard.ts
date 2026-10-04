@@ -17,9 +17,9 @@ import { getDeployer } from "./lib/getDeployer";
  */
 async function main() {
   const deployer = await getDeployer();
-  const safeAddress = process.env.SAFE_ADDRESS;
+  const safeAddress = process.env.SAFE_ADDRESS || process.env.NEXT_PUBLIC_SAFE_ADDRESS;
   const owner2Key = process.env.OWNER2_KEY;
-  if (!safeAddress) throw new Error("Set SAFE_ADDRESS in .env");
+  if (!safeAddress) throw new Error("Set NEXT_PUBLIC_SAFE_ADDRESS in .env (deploy.ts writes it), or pass SAFE_ADDRESS");
 
   // A raw ethers.Wallet gets no gas price injected by Hardhat — see deploy-multisig-rebalance.ts.
   const gasPrice = ((await ethers.provider.getFeeData()).gasPrice ?? 1_140_000_000_000n) * 2n;

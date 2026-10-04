@@ -39,11 +39,11 @@ async function associate(
 async function main() {
   const deployer = await getDeployer();
 
-  const safeAddress = process.env.SAFE_ADDRESS;
-  const moduleAddress = process.env.MODULE_ADDRESS;
+  const safeAddress = process.env.SAFE_ADDRESS || process.env.NEXT_PUBLIC_SAFE_ADDRESS;
+  const moduleAddress = process.env.MODULE_ADDRESS || process.env.NEXT_PUBLIC_MODULE_ADDRESS;
   if (!safeAddress || !moduleAddress) {
     throw new Error(
-      "Set SAFE_ADDRESS and MODULE_ADDRESS env vars (from deploy.ts's output)"
+      "Set NEXT_PUBLIC_SAFE_ADDRESS and NEXT_PUBLIC_MODULE_ADDRESS in .env (deploy.ts writes them), or pass SAFE_ADDRESS/MODULE_ADDRESS"
     );
   }
 

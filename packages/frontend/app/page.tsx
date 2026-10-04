@@ -858,9 +858,12 @@ export default function Home() {
               <div className="ledger-row" key={o}>
                 <span className="ledger-key" title={o}>
                   {shortenAddress(o)}
+                  {o.toLowerCase() === account?.toLowerCase() && " (you)"}
                 </span>
                 <span className="ledger-value">
-                  {isOwner && safeState.owners.length > 1 && (
+                  {/* No self-removal: an owner can't propose removing themselves, though other
+                      owners can still propose removing them. */}
+                  {isOwner && safeState.owners.length > 1 && o.toLowerCase() !== account?.toLowerCase() && (
                     <button
                       className="btn btn-secondary"
                       onClick={() => handleProposeRemoveOwner(o)}
@@ -956,8 +959,11 @@ export default function Home() {
       <section className="ledger-section">
         <p className="section-label">Rebalance</p>
         <p className="section-desc">
-          Needs {threshold} of {safeState?.owners.length ?? 1} owner signatures — no single owner
-          can move funds alone. Propose, then Approve and Execute separately.
+          Needs {threshold} of {safeState?.owners.length ?? 1} owner signatures
+          {threshold > 1
+            ? " — no single owner can move funds alone."
+            : ". With one owner, add more in the MultiSig tab to require a quorum."}{" "}
+          Propose, then Approve and Execute separately.
         </p>
         <div className="swap-form">
           <input

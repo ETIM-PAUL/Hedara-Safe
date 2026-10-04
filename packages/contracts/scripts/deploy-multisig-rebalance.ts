@@ -47,14 +47,14 @@ function buildSignatures(approvers: string[]): string {
 async function main() {
   const deployer = await getDeployer();
 
-  const safeAddress = process.env.SAFE_ADDRESS;
+  const safeAddress = process.env.SAFE_ADDRESS || process.env.NEXT_PUBLIC_SAFE_ADDRESS;
   const routerAddress = process.env.SAUCERSWAP_ROUTER_ADDRESS;
   const owner2Address = process.env.OWNER2_ADDRESS;
   const owner2Key = process.env.OWNER2_KEY;
   const owner3Address = process.env.OWNER3_ADDRESS;
   if (!safeAddress || !routerAddress || !owner2Address || !owner2Key || !owner3Address) {
     throw new Error(
-      "Set SAFE_ADDRESS, SAUCERSWAP_ROUTER_ADDRESS, OWNER2_ADDRESS, OWNER2_KEY, OWNER3_ADDRESS in .env"
+      "Set NEXT_PUBLIC_SAFE_ADDRESS (or SAFE_ADDRESS), SAUCERSWAP_ROUTER_ADDRESS, OWNER2_ADDRESS, OWNER2_KEY, OWNER3_ADDRESS in .env"
     );
   }
 

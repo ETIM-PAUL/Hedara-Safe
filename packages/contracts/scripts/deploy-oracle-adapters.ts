@@ -22,10 +22,10 @@ enum Comparison {
 
 async function main() {
   const deployer = await getDeployer();
-  const safeAddress = process.env.SAFE_ADDRESS;
+  const safeAddress = process.env.SAFE_ADDRESS || process.env.NEXT_PUBLIC_SAFE_ADDRESS;
   const routerAddress = process.env.SAUCERSWAP_ROUTER_ADDRESS;
   if (!safeAddress || !routerAddress) {
-    throw new Error("Set SAFE_ADDRESS and SAUCERSWAP_ROUTER_ADDRESS env vars");
+    throw new Error("Set NEXT_PUBLIC_SAFE_ADDRESS (or SAFE_ADDRESS) and SAUCERSWAP_ROUTER_ADDRESS in .env");
   }
 
   console.log("Deploying oracle adapters...");

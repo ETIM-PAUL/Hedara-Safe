@@ -69,7 +69,8 @@ adapter has no condition to gate on — it'd just be `RebalanceModule` again, ba
 - `packages/contracts/contracts/mocks/` — test doubles (`MockSafe`, `MockERC20`,
   `MockSaucerSwapRouter`, `MockOracleAdapter`, `MockChainlinkAggregator`, `MockSupraStorage`) used
   only by the test suite, not deployed.
-- `packages/contracts/scripts/deploy.ts` — the real deploy sequence: Safe, `SafeProxyFactory`, `RebalanceModule`, enable module.
+- `packages/contracts/scripts/deploy.ts` — the one setup command: Safe, both modules enabled, the majority
+  guard installed, an HCS topic for this Safe, and every resulting value written into `.env`.
 - `packages/contracts/scripts/deploy-oracle-adapters.ts` — deploys both oracle adapters and the
   `PriceGuardedRebalanceModule`, enables it, fires a plain `trigger()` via Chainlink, then a
   combined `switchOracleAndTrigger()` to Supra in one signed call — see the proof below.
@@ -79,7 +80,8 @@ adapter has no condition to gate on — it'd just be `RebalanceModule` again, ba
   grows the Safe from 1 to 3 owners, raises the threshold to 2-of-3, and proves a real
   quorum-gated rebalance (including a deliberate premature-execution attempt that must revert) —
   see [Multisig](#multisig-adding-owners-and-quorum-gated-rebalances) below.
-- `packages/contracts/scripts/create-proposals-topic.ts` — creates the HCS topic Safe proposals
+- `packages/contracts/scripts/create-proposals-topic.ts` — creates a standalone HCS topic (`deploy.ts`
+  already creates one per Safe) that Safe proposals
   (rebalances and owner changes) get published to — see [Proposal relay via
   HCS](#proposal-relay-via-hcs) below.
 - `packages/frontend` — Next.js app, organized into three tabs (**SafeSwap**, **MultiSig**, **Price
@@ -116,26 +118,25 @@ Then:
 cp .env.example .env
 ```
 
-Then fill in `.env`:
+Fill in **two values** — `HEDERA_OPERATOR_ID` and `HEDERA_OPERATOR_KEY`. Everything else either has
+a working testnet default already or gets written by the deploy command:
 
-| Variable                    | Where it comes from                                                                                                                                                                                                                 |
-| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `HEDERA_OPERATOR_ID`        | Your account ID (`0.0.x`) from the [Hedera Portal](https://portal.hedera.com/)                                                                                                                                                      |
-| `HEDERA_OPERATOR_KEY`       | That account's **ECDSA** private key — not ED25519, which has no EVM alias. Fund the account with the Portal's testnet faucet before deploying.                                                                                     |
-| `HEDERA_TESTNET_RPC_URL`    | Defaults to `https://testnet.hashio.io/api`, Hedera's public JSON-RPC relay                                                                                                                                                         |
-| `SAUCERSWAP_ROUTER_ADDRESS` | The V1 router's EVM address. On testnet: `0x0000000000000000000000000000000000004b40` (contract `0.0.19264` — resolve the EVM form of any Hedera contract ID via `GET https://testnet.mirrornode.hedera.com/api/v1/contracts/{id}`) |
-| `NEXT_PUBLIC_SAUCERSWAP_ROUTER_ADDRESS` | Same address as above, exposed to the browser — the frontend uses it for live swap quotes via `getAmountsOut` |
-| `NEXT_PUBLIC_SAFE_ADDRESS`  | Printed by `deploy.ts` below — leave blank until you've deployed                                                                                                                                                                    |
-| `NEXT_PUBLIC_MODULE_ADDRESS` | Also printed by `deploy.ts` — the `RebalanceModule` address. If you also run `deploy-multisig-rebalance.ts`, update this to the address it prints — that script deploys a new module instance |
-| `OWNER2_ADDRESS` / `OWNER2_KEY` / `OWNER3_ADDRESS` | Only needed for `deploy-multisig-rebalance.ts` — two throwaway testnet EVM accounts (funded with a little HBAR) that become the Safe's 2nd and 3rd owners for the quorum proof |
-| `NEXT_PUBLIC_PRICE_GUARD_MODULE_ADDRESS` | Printed by `deploy-oracle-adapters.ts` — optional, the **Price Guard** tab is hidden if unset |
-| `NEXT_PUBLIC_CHAINLINK_ADAPTER_ADDRESS` / `NEXT_PUBLIC_SUPRA_ADAPTER_ADDRESS` | Also printed by `deploy-oracle-adapters.ts` — only the ones set show up as switch options in the UI |
-| `NEXT_PUBLIC_PROPOSALS_TOPIC_ID` | Printed by `create-proposals-topic.ts` — optional, both the SafeSwap and MultiSig tabs fall back to manual copy/paste if unset |
-| `NEXT_PUBLIC_HEDERA_RPC_URL` | Optional — defaults to the same public relay as `HEDERA_TESTNET_RPC_URL`. Lets the frontend read Safe state before a wallet connects |
-| `NEXT_PUBLIC_TOKEN_IN_*` / `NEXT_PUBLIC_TOKEN_OUT_*` | Optional — override which two treasury tokens the dashboard shows. Defaults to the WHBAR/SAUCE pair `demo-rebalance.ts` uses |
-| `SAFE_ADDRESS` / `MODULE_ADDRESS` | Script inputs, not read by the frontend — the Safe and `RebalanceModule` addresses `deploy.ts` printed. Set them here or inline on each command (as the "Reproducing…" sections show) |
-| `SAFE_OWNERS` / `SAFE_THRESHOLD` | Optional, `deploy.ts` only — comma-separated owner addresses and threshold for a multi-owner Safe. Unset means a 1-of-1 Safe owned by the deployer |
-| `MAJORITY_GUARD_ADDRESS` | Optional, `deploy-majority-guard.ts` only — reuse an already deployed guard instead of deploying a new one |
+| Variable | Where it comes from |
+| --- | --- |
+| `HEDERA_OPERATOR_ID` | **You.** Your account ID (`0.0.x`) from the [Hedera Portal](https://portal.hedera.com/) |
+| `HEDERA_OPERATOR_KEY` | **You.** That account's **ECDSA** private key — not ED25519, which has no EVM alias. Fund the account from the Portal's testnet faucet before deploying |
+| `HEDERA_TESTNET_RPC_URL` / `NEXT_PUBLIC_HEDERA_RPC_URL` | Default: `https://testnet.hashio.io/api`, Hedera's public JSON-RPC relay. The `NEXT_PUBLIC_` copy lets the frontend read Safe state before a wallet connects |
+| `SAUCERSWAP_ROUTER_ADDRESS` / `NEXT_PUBLIC_SAUCERSWAP_ROUTER_ADDRESS` | Default: the SaucerSwap V1 router on testnet, `0x…4b40` (contract `0.0.19264`). The `NEXT_PUBLIC_` copy powers live quotes via `getAmountsOut` |
+| `NEXT_PUBLIC_CHAINLINK_ADAPTER_ADDRESS` / `NEXT_PUBLIC_SUPRA_ADAPTER_ADDRESS` | Default: shared HBAR/USD oracle adapters already live on testnet. They're stateless, so every Safe can reuse them; clear one to have the deploy command deploy your own |
+| `MAJORITY_GUARD_ADDRESS` | Default: the shared, stateless `MajorityThresholdGuard` on testnet, reused the same way |
+| `NEXT_PUBLIC_SAFE_ADDRESS`, `NEXT_PUBLIC_MODULE_ADDRESS`, `NEXT_PUBLIC_PRICE_GUARD_MODULE_ADDRESS`, `NEXT_PUBLIC_PROPOSALS_TOPIC_ID` | **Written by `npm run deploy:testnet`.** Your Safe, its `RebalanceModule`, its `PriceGuardedRebalanceModule`, and its own HCS topic for proposals |
+| `NEXT_PUBLIC_TOKEN_IN_*` / `NEXT_PUBLIC_TOKEN_OUT_*` | Optional — override which two treasury tokens the dashboard shows. Defaults to WHBAR/SAUCE |
+| `SAFE_OWNERS` / `SAFE_THRESHOLD` | Optional, deploy only — start the Safe with several owners (comma-separated addresses) and a threshold. Blank means a 1-of-1 Safe owned by your operator |
+| `OWNER2_ADDRESS` / `OWNER2_KEY` / `OWNER3_ADDRESS` | Only for `deploy-multisig-rebalance.ts` — two throwaway testnet accounts (each funded with a little HBAR) that become owners 2 and 3 for the quorum proof |
+
+The scripts read the Safe and module from the `NEXT_PUBLIC_` values above. To point a single run at
+a different Safe, prefix the command with `SAFE_ADDRESS=…` (and `MODULE_ADDRESS=…` for
+`demo-rebalance.ts`).
 
 Check the toolchain before deploying anything. None of these need a funded account or a filled-in
 `.env`:
@@ -149,45 +150,48 @@ npm run build  # compiles contracts, then builds the frontend
 ## Deploy contracts to Hedera testnet
 
 ```bash
-npm run build --workspace packages/contracts
 npm run deploy:testnet --workspace packages/contracts
 ```
 
-This deploys the Safe singleton, `SafeProxyFactory`, one Safe proxy, and `RebalanceModule`, then
-enables the module on the Safe. Copy the printed Safe address into `NEXT_PUBLIC_SAFE_ADDRESS`.
+One command sets up everything that needs your operator key, then writes the results into `.env`:
 
-By default the Safe is deployed 1-of-1, owned by the deployer — enough to demo the module without
-external wallet signing. For a real multi-owner Safe, set `SAFE_OWNERS` (comma-separated
-addresses) and `SAFE_THRESHOLD` before deploying; `enableModule` then won't run automatically
-(it needs a threshold of owner signatures collected out of band — see the script's console output
-for what to submit).
+1. A Safe (singleton, `SafeProxyFactory`, proxy) owned by your operator, 1-of-1.
+2. `RebalanceModule` for that Safe, enabled.
+3. `PriceGuardedRebalanceModule` for that Safe — HBAR/USD ≤ $0.10, starting on Chainlink, switchable
+   to Supra — enabled. It reuses the shared adapters from `.env`.
+4. `MajorityThresholdGuard` installed on the Safe (reused, not redeployed).
+5. A new HCS topic for this Safe's proposals. One per Safe, because proposals don't name their Safe,
+   so a shared topic would mix everyone's proposals into one list.
+6. `NEXT_PUBLIC_SAFE_ADDRESS`, `NEXT_PUBLIC_MODULE_ADDRESS`, `NEXT_PUBLIC_PRICE_GUARD_MODULE_ADDRESS`
+   and `NEXT_PUBLIC_PROPOSALS_TOPIC_ID` written into `.env`. If they already held values, the
+   command prints the old ones so they aren't lost.
 
-Deploying plus [funding the Safe](#fund-the-safe) below is the minimum to run the basic flow. Each
-additional feature has its own deploy script and its own "Reproducing..." section later in this
-doc — run whichever you want:
+It checks `HEDERA_OPERATOR_ID` and `HEDERA_OPERATOR_KEY` before deploying anything, so a missing
+key or the `0.0.xxxxxx` placeholder stops it with a clear message instead of failing halfway.
 
-- Price Guard (Chainlink/Supra) → `deploy-oracle-adapters.ts`, see [Reproducing the oracle switch](#reproducing-the-oracle-switch)
-- 2-of-3 owner quorum → `deploy-multisig-rebalance.ts`, see [Reproducing the multisig proof](#reproducing-the-multisig-proof)
-- HCS proposal relay → `create-proposals-topic.ts`, see [Reproducing the HCS topic](#reproducing-the-hcs-topic)
-- On-chain majority rule → `deploy-majority-guard.ts`, see [Reproducing the majority guard](#reproducing-the-majority-guard)
+To start with several owners, set `SAFE_OWNERS` and `SAFE_THRESHOLD` first. One key can't approve
+for a multi-owner Safe, so the deploy then prints the enable-module and set-guard calls for the
+owners to submit instead of running them.
+
+The separate scripts — `deploy-oracle-adapters.ts`, `deploy-multisig-rebalance.ts`,
+`create-proposals-topic.ts`, `deploy-majority-guard.ts` — reproduce the original proofs below on an
+existing Safe; a new Safe doesn't need any of them.
 
 ## Fund the Safe
 
 A freshly deployed Safe can't swap yet. On Hedera, an account must be **associated** with a token
-before it can hold it, and the new Safe holds nothing. `demo-rebalance.ts` does the whole setup in
-one run, using the two addresses `deploy.ts` printed:
+before it can hold it, and the new Safe holds nothing. One more command does the setup, reading the
+Safe and module from `.env`:
 
 ```bash
 cd packages/contracts
-SAFE_ADDRESS=<from deploy.ts> MODULE_ADDRESS=<from deploy.ts> \
 npx hardhat run scripts/demo-rebalance.ts --network hedera-testnet
 ```
 
 It associates your account and the Safe with WHBAR and SAUCE, wraps 5 testnet HBAR into WHBAR,
 moves half of it into the Safe, and swaps half of that to SAUCE through the Safe — so the Safe ends
-up holding both tokens and the app can rebalance in either direction. Your operator account needs
-roughly 10 testnet HBAR for this (5 to wrap, the rest for gas). It signs as the deployer alone, so
-run it on the fresh 1-of-1 Safe, before adding owners. See [Reproducing the
+up holding both tokens and the app can rebalance in either direction. It signs as your operator
+alone, so run it on the fresh 1-of-1 Safe, before adding owners. See [Reproducing the
 transaction](#reproducing-the-transaction) for each step.
 
 ## Run the frontend
@@ -214,7 +218,8 @@ row:
   publishing fails). Once enough approvals exist, anyone can hit **Execute now**. See [Proposal
   relay via HCS](#proposal-relay-via-hcs) for how this works.
 - **MultiSig** — owner management: every current owner listed with a **Remove** button (shown
-  only to owners, and only while the Safe has more than one owner), and an **Add owner** form (an
+  only to owners, only while the Safe has more than one owner, and never on your own row — you
+  can't propose removing yourself, though the other owners can), and an **Add owner** form (an
   address field plus an editable **New threshold**). Both go
   through the exact same propose/approve/execute quorum flow as a rebalance above — adding or
   removing an owner is a real Safe `execTransaction` (`addOwnerWithThreshold`/`removeOwner`, both
@@ -524,8 +529,6 @@ real answer instead.
 
 ```bash
 cd packages/contracts
-SAFE_ADDRESS=<from NEXT_PUBLIC_SAFE_ADDRESS> \
-MODULE_ADDRESS=<RebalanceModule address, printed by deploy.ts> \
 npx hardhat run scripts/demo-rebalance.ts --network hedera-testnet
 ```
 
@@ -553,8 +556,6 @@ directly if you want to reproduce this against a different SaucerSwap pool.
 
 ```bash
 cd packages/contracts
-SAFE_ADDRESS=<from NEXT_PUBLIC_SAFE_ADDRESS> \
-SAUCERSWAP_ROUTER_ADDRESS=<from .env> \
 npx hardhat run scripts/deploy-oracle-adapters.ts --network hedera-testnet
 ```
 
@@ -577,8 +578,6 @@ module and its switch options in the frontend.
 
 ```bash
 cd packages/contracts
-SAFE_ADDRESS=<from NEXT_PUBLIC_SAFE_ADDRESS> \
-SAUCERSWAP_ROUTER_ADDRESS=<from .env> \
 OWNER2_ADDRESS=<a 2nd testnet EVM address> OWNER2_KEY=<its private key> \
 OWNER3_ADDRESS=<a 3rd testnet EVM address> \
 npx hardhat run scripts/deploy-multisig-rebalance.ts --network hedera-testnet
@@ -637,7 +636,6 @@ topic, each tab filtering to the proposal kinds it cares about.
 
 ```bash
 cd packages/contracts
-SAFE_ADDRESS=<from NEXT_PUBLIC_SAFE_ADDRESS> \
 OWNER2_KEY=<only if the threshold needs a second signer> \
 npx hardhat run scripts/deploy-majority-guard.ts --network hedera-testnet
 ```

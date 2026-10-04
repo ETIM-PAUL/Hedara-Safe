@@ -82,11 +82,23 @@ something to refactor.
   simulate a call arriving with `msg.sender == address(safe)`, rather than adding real Safe
   signature-verification logic to the mock — that's what a real Safe already does, so testing it
   again in the mock would just be testing the mock.
-- `packages/contracts/scripts/deploy.ts` — deployment sequence: Safe singleton → `SafeProxyFactory`
-  → Safe proxy → `RebalanceModule` → enable module on Safe. Keep this order; the module can't be
-  enabled before the Safe proxy exists. `enableModule` only runs automatically for a 1-of-1,
-  deployer-owned Safe (`SAFE_OWNERS`/`SAFE_THRESHOLD` unset) — a real multi-owner Safe needs that
-  step submitted separately once enough owner signatures are collected.
+- `packages/contracts/scripts/deploy.ts` — the one setup command (`npm run deploy:testnet`): Safe
+  singleton → `SafeProxyFactory` → Safe proxy → `RebalanceModule` (enabled) →
+  `PriceGuardedRebalanceModule` (enabled) → `MajorityThresholdGuard` (set) → a new HCS topic → the
+  resulting values written into the repo-root `.env`. Keep this order: nothing can be enabled
+  before the Safe proxy exists. The adapters and guard are stateless and Safe-agnostic, so it
+  reuses the addresses in `.env` (defaults in `.env.example`) when they have code on the network,
+  and deploys fresh ones otherwise. The Price Guard module and HCS topic are per-Safe and always
+  new — never default the topic: proposals don't name their Safe, so a shared topic mixes Safes.
+  Safe calls only run automatically for a 1-of-1, deployer-owned Safe; with `SAFE_OWNERS` set they're
+  printed for the owners to submit. On the local `hardhat` network it skips the topic and leaves
+  `.env` untouched, so `--network hardhat` is the safe way to test changes to it.
+- `packages/contracts/scripts/lib/` — shared script helpers: `getDeployer.ts` (fails with a clear
+  "set HEDERA_OPERATOR_KEY" message instead of an undefined signer), `proposalsTopic.ts` (HCS
+  topic creation), `envFile.ts` (sets keys in the repo-root `.env`, leaving other lines alone and
+  returning replaced values so they can be printed). The other scripts read the Safe and module
+  from `NEXT_PUBLIC_SAFE_ADDRESS`/`NEXT_PUBLIC_MODULE_ADDRESS`, with `SAFE_ADDRESS`/`MODULE_ADDRESS`
+  as per-run overrides.
 - `packages/contracts/scripts/demo-rebalance.ts` — seeds a deployed Safe with real testnet tokens
   and triggers an actual rebalance. Read this before touching HTS token interactions: Hedera
   requires explicit association (`IHRC719.associate()`) before _any_ account — including the
@@ -105,10 +117,9 @@ something to refactor.
   2 required approvals, which must revert. Needs `OWNER2_ADDRESS`/`OWNER2_KEY`/`OWNER3_ADDRESS` in
   `.env` (two funded throwaway testnet accounts) — this is the one script in this repo that needs
   more than the single operator key, since proving a quorum requires genuinely different signers.
-- `packages/contracts/scripts/create-proposals-topic.ts` — the one script that uses the native
-  `@hashgraph/sdk` instead of Hardhat/ethers, because creating an HCS topic has no EVM/JSON-RPC
-  equivalent. One-time setup for the proposal relay (see below) — run once, save the printed topic
-  ID into `.env`.
+- `packages/contracts/scripts/create-proposals-topic.ts` — creates a standalone HCS topic, via the
+  native `@hashgraph/sdk` (topic creation has no EVM/JSON-RPC equivalent). `deploy.ts` already
+  creates one per Safe; this is for replacing a Safe's topic or one deployed some other way.
 - `packages/frontend/lib/` — `wallet.ts` (EIP-1193 connect/disconnect + Hedera testnet chain
   add/switch), `safe.ts` (Safe/treasury reads — kept read-only by convention; anything that sends
   a Safe transaction lives in `multisig.ts` instead), `rebalance.ts` (SaucerSwap quote/slippage
