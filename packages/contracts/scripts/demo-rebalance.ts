@@ -1,4 +1,5 @@
 import { ethers } from "hardhat";
+import { getDeployer } from "./lib/getDeployer";
 
 /**
  * Seeds a freshly deployed Safe with a real token and triggers a real rebalance through
@@ -36,7 +37,7 @@ async function associate(
 }
 
 async function main() {
-  const [deployer] = await ethers.getSigners();
+  const deployer = await getDeployer();
 
   const safeAddress = process.env.SAFE_ADDRESS;
   const moduleAddress = process.env.MODULE_ADDRESS;

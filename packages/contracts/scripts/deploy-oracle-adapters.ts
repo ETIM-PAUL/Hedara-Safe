@@ -1,4 +1,5 @@
 import { ethers } from "hardhat";
+import { getDeployer } from "./lib/getDeployer";
 
 /**
  * Deploys the Chainlink and Supra oracle adapters, a fresh PriceGuardedRebalanceModule wired to
@@ -20,7 +21,7 @@ enum Comparison {
 }
 
 async function main() {
-  const [deployer] = await ethers.getSigners();
+  const deployer = await getDeployer();
   const safeAddress = process.env.SAFE_ADDRESS;
   const routerAddress = process.env.SAUCERSWAP_ROUTER_ADDRESS;
   if (!safeAddress || !routerAddress) {

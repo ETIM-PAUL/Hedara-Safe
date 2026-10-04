@@ -1,4 +1,5 @@
 import { ethers } from "hardhat";
+import { getDeployer } from "./lib/getDeployer";
 
 /**
  * Proves the 2-of-3 multisig rebalance flow on real testnet, end to end:
@@ -44,7 +45,7 @@ function buildSignatures(approvers: string[]): string {
 }
 
 async function main() {
-  const [deployer] = await ethers.getSigners();
+  const deployer = await getDeployer();
 
   const safeAddress = process.env.SAFE_ADDRESS;
   const routerAddress = process.env.SAUCERSWAP_ROUTER_ADDRESS;

@@ -100,8 +100,19 @@ adapter has no condition to gate on — it'd just be `RebalanceModule` again, ba
 
 ## Setup
 
+Scaffold a copy of this template:
+
 ```bash
-npm install
+npm create scaffold-hbar@latest hedera-safe-swap -- --template ETIM-PAUL/Hedara-Safe
+cd hedera-safe-swap
+```
+
+Keep the bare `--`: without it, npm keeps `--template` for itself and passes `ETIM-PAUL/Hedara-Safe`
+on as the project name, which fails with "name can no longer contain capital letters". The
+scaffold installs dependencies for you. If you cloned the repo instead, run `npm install` first.
+Then:
+
+```bash
 cp .env.example .env
 ```
 

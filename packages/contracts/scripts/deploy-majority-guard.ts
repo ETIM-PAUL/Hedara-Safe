@@ -1,4 +1,5 @@
 import { ethers } from "hardhat";
+import { getDeployer } from "./lib/getDeployer";
 
 /**
  * Installs MajorityThresholdGuard on the existing Safe, so a below-majority threshold becomes
@@ -15,7 +16,7 @@ import { ethers } from "hardhat";
  * OWNER2_KEY — the same two keys deploy-multisig-rebalance.ts uses. Needs SAFE_ADDRESS.
  */
 async function main() {
-  const [deployer] = await ethers.getSigners();
+  const deployer = await getDeployer();
   const safeAddress = process.env.SAFE_ADDRESS;
   const owner2Key = process.env.OWNER2_KEY;
   if (!safeAddress) throw new Error("Set SAFE_ADDRESS in .env");

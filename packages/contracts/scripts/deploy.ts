@@ -1,4 +1,5 @@
 import { ethers } from "hardhat";
+import { getDeployer } from "./lib/getDeployer";
 
 /**
  * Deploy sequence: Safe singleton -> proxy factory -> Safe proxy -> RebalanceModule -> enable
@@ -10,7 +11,7 @@ import { ethers } from "hardhat";
  * so this script only auto-enables the module when the deployer is the Safe's sole owner.
  */
 async function main() {
-  const [deployer] = await ethers.getSigners();
+  const deployer = await getDeployer();
   console.log(`Deploying from ${deployer.address}`);
 
   const routerAddress = process.env.SAUCERSWAP_ROUTER_ADDRESS;
